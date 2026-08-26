@@ -1,0 +1,22 @@
+services:
+  lark-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: lark-daily-bot
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_PATH: /app/data/lark-bot.db  
+      LARK_APP_SECRET: ${LARK_APP_SECRET} 
+      LARK_REPORT_CHAT_ID: ${LARK_REPORT_CHAT_ID}
+      LARK_APP_ID: ${LARK_APP_ID}
+
+    volumes:
+      - ./data:/app/data
+      - ./downloads:/app/downloads

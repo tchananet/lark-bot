@@ -1,0 +1,19 @@
+{
+  "name": "lark-daily-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.73.0",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.4.2",
+    "mammoth": "^1.12.1"
+  }
+}
