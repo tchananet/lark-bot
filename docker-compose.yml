@@ -8,9 +8,6 @@ services:
 
     restart: unless-stopped
 
-    env_file:
-      - .env
-
     environment:
       DATABASE_PATH: /app/data/lark-bot.db  
       LARK_APP_SECRET: ${LARK_APP_SECRET} 
