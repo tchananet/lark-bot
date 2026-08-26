@@ -250,6 +250,9 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
             content: text,
         });
 
+
+        await sendToReportGroup(text);
+
         console.log("✓ Message enregistré");
     }
 
