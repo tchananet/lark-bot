@@ -95,6 +95,16 @@ function claimMessage(messageId) {
 }
 
 
+// À appeler si le traitement échoue : sans cela le message reste
+// réservé pour toujours et Lark ne peut plus le relivrer.
+function releaseMessage(messageId) {
+  return db.prepare(`
+    DELETE FROM received_messages
+    WHERE message_id = ?
+  `).run(messageId);
+}
+
+
 function getDailyBatch(date = null) {
   const targetDate =
     date || new Date().toISOString().slice(0, 10);
@@ -140,11 +150,11 @@ function saveUser(data) {
     VALUES (?, ?, ?, ?, ?, ?)
 
     ON CONFLICT(open_id) DO UPDATE SET
-      user_id = excluded.user_id,
-      union_id = excluded.union_id,
-      name = excluded.name,
-      email = excluded.email,
-      department = excluded.department,
+      user_id = COALESCE(excluded.user_id, user_id),
+      union_id = COALESCE(excluded.union_id, union_id),
+      name = COALESCE(excluded.name, name),
+      email = COALESCE(excluded.email, email),
+      department = COALESCE(excluded.department, department),
       updated_at = CURRENT_TIMESTAMP
   `);
 
@@ -215,5 +225,6 @@ module.exports = {
   saveUser,
     getDailyBatch,
     claimMessage,
+    releaseMessage,
 
 };

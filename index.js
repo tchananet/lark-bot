@@ -7,7 +7,7 @@ const Lark = require("@larksuiteoapi/node-sdk");
 const {
   saveMessage,
   saveAttachment,  saveUser,   claimMessage,
-
+  releaseMessage,
 
 } = require("./database");
 
@@ -128,6 +128,68 @@ console.dir(upload, { depth: null });
   }
 }
 
+// Lark n'accepte qu'une liste fermée de file_type à l'upload.
+const LARK_FILE_TYPES = {
+  ".pdf": "pdf",
+  ".doc": "doc",
+  ".docx": "doc",
+  ".xls": "xls",
+  ".xlsx": "xls",
+  ".ppt": "ppt",
+  ".pptx": "ppt",
+  ".mp4": "mp4",
+  ".opus": "opus",
+};
+
+function larkFileType(fileName) {
+  return (
+    LARK_FILE_TYPES[path.extname(fileName || "").toLowerCase()] ||
+    "stream"
+  );
+}
+
+async function sendFileToReportGroup(filePath, fileName, options = {}) {
+  try {
+    const fileType = options.fileType || larkFileType(fileName);
+
+    const upload = await client.im.v1.file.create({
+      data: {
+        file_type: fileType,
+        file_name: fileName,
+        ...(options.duration ? { duration: options.duration } : {}),
+        file: fs.createReadStream(filePath),
+      },
+    });
+
+    const fileKey = upload?.file_key;
+
+    if (!fileKey) {
+      console.error(
+        "Impossible de récupérer file_key après upload :",
+        fileName
+      );
+      return;
+    }
+
+    await client.im.v1.message.create({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: process.env.LARK_REPORT_CHAT_ID,
+        msg_type: fileType === "opus" ? "audio" : "file",
+        content: JSON.stringify({
+          file_key: fileKey,
+        }),
+      },
+    });
+
+    console.log("✓ Fichier envoyé au groupe :", fileName);
+  } catch (error) {
+    console.error("Erreur envoi fichier au groupe :", error);
+  }
+}
+
 async function enrichUserFromLark(openId) {
   try {
     const response = await client.contact.v3.user.get({
@@ -181,8 +243,7 @@ async function sendToReportGroup(text) {
 }
 
 
-const eventDispatcher = new Lark.EventDispatcher({}).register({
-  "im.message.receive_v1": async (data) => {
+async function handleMessage(data) {
     const message = data.message;
     const sender = data.sender;
 
@@ -213,17 +274,20 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
         return;
     }
 
+    // Enrichir AVANT d'enregistrer, sinon on écrase le profil
+    // avec des valeurs vides à chaque message.
+    const larkUser = await enrichUserFromLark(
+        sender.sender_id.open_id
+    );
+
     saveUser({
         open_id: sender.sender_id.open_id,
         user_id: sender.sender_id.user_id,
         union_id: sender.sender_id.union_id,
+        name: larkUser?.name,
+        email: larkUser?.email,
+        department: larkUser?.department_ids?.join(", "),
     });
-
-
-
-    const larkUser = await enrichUserFromLark(
-    sender.sender_id.open_id
-    );
 
     const senderName =  larkUser?.name || sender.sender_id.open_id;
 
@@ -287,6 +351,11 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
             parsedContent.file_name
         );
 
+        await sendFileToReportGroup(
+            filePath,
+            parsedContent.file_name
+        );
+
         console.log("✓ Fichier enregistré");
     }
 
@@ -315,6 +384,15 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
         await sendReportHeader(
             senderName,
             "Note vocale"
+        );
+
+        await sendFileToReportGroup(
+            audioPath,
+            `${message.message_id}.opus`,
+            {
+                fileType: "opus",
+                duration: parsedContent.duration,
+            }
         );
 
         console.log("✓ Audio enregistré :", audioPath);
@@ -347,6 +425,8 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
             senderName,
             "Image"
         );
+
+        await sendImageToReportGroup(imagePath);
 
         console.log("✓ Image enregistrée");
     }
@@ -411,6 +491,27 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
     console.log("Type :", message.message_type);
     console.log("Contenu :", content);
     console.log("========================\n");
+}
+
+
+const eventDispatcher = new Lark.EventDispatcher({}).register({
+  "im.message.receive_v1": async (data) => {
+    const messageId = data.message?.message_id;
+
+    try {
+      await handleMessage(data);
+    } catch (error) {
+      console.error(
+        `Erreur traitement message ${messageId} :`,
+        error
+      );
+
+      // Libérer la réservation pour que Lark puisse relivrer
+      // l'événement, sinon le message est perdu définitivement.
+      if (messageId) {
+        releaseMessage(messageId);
+      }
+    }
   },
 });
 

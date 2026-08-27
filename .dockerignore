@@ -1,0 +1,19 @@
+# Rebuilt dans l'image par `npm ci` — ne jamais copier depuis l'hôte
+node_modules
+npm-debug.log*
+
+# Secrets : ne doivent jamais entrer dans une couche d'image
+.env
+.env.*
+*.pem
+
+# Données runtime — montées en volume par docker-compose
+data
+downloads
+*.db
+
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
