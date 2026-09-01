@@ -7,6 +7,15 @@ const dbPath =
 
 const db = new Database(dbPath);
 
+// Le Cameroun est a UTC+1 sans heure d ete, alors que SQLite stocke
+// CURRENT_TIMESTAMP en UTC. Sans ce decalage, un message envoye a
+// 00h30 heure locale est classe dans la journee precedente.
+const TZ_OFFSET = process.env.DB_TZ_OFFSET || "+1 hours";
+
+function localToday() {
+  return db.prepare("SELECT DATE(CURRENT_TIMESTAMP, ?) AS d").get(TZ_OFFSET).d;
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,21 +115,21 @@ function releaseMessage(messageId) {
 
 
 function getDailyBatch(date = null) {
-  const targetDate =
-    date || new Date().toISOString().slice(0, 10);
+  const targetDate = date || localToday();
 
   const messages = db.prepare(`
     SELECT
       m.*,
       u.name AS sender_name,
       u.email AS sender_email,
-      u.department AS sender_department
+      u.department AS sender_department,
+      DATETIME(m.created_at, ?) AS local_time
     FROM messages m
     LEFT JOIN users u
       ON u.open_id = m.sender_id
-    WHERE DATE(m.created_at) = ?
+    WHERE DATE(m.created_at, ?) = ?
     ORDER BY m.created_at ASC
-  `).all(targetDate);
+  `).all(TZ_OFFSET, TZ_OFFSET, targetDate);
 
   const attachmentQuery = db.prepare(`
     SELECT *
@@ -226,5 +235,6 @@ module.exports = {
     getDailyBatch,
     claimMessage,
     releaseMessage,
+    localToday,
 
 };

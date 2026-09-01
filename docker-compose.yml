@@ -13,6 +13,8 @@ services:
       LARK_APP_SECRET: ${LARK_APP_SECRET} 
       LARK_REPORT_CHAT_ID: ${LARK_REPORT_CHAT_ID}
       LARK_APP_ID: ${LARK_APP_ID}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TZ: Africa/Douala
 
     volumes:
       - ./data:/app/data

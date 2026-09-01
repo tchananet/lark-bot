@@ -3,7 +3,9 @@ const fs = require("fs");
 const path = require("path");
 const { extractWord } = require("./extractors");
 
+const cron = require("node-cron");
 const Lark = require("@larksuiteoapi/node-sdk");
+const { runDigest } = require("./digest");
 const {
   saveMessage,
   saveAttachment,  saveUser,   claimMessage,
@@ -518,3 +520,22 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
 wsClient.start({
   eventDispatcher,
 });
+
+
+// Rapport quotidien : 18h heure du Cameroun par defaut.
+const DIGEST_CRON = process.env.DIGEST_CRON || "0 18 * * *";
+const DIGEST_TIMEZONE = process.env.DIGEST_TIMEZONE || "Africa/Douala";
+
+if (process.env.DIGEST_ENABLED === "false") {
+  console.log("Rapport quotidien desactive (DIGEST_ENABLED=false)");
+} else {
+  cron.schedule(DIGEST_CRON, () => runDigest(), {
+    timezone: DIGEST_TIMEZONE,
+    name: "rapport-quotidien",
+    noOverlap: true,
+  });
+
+  console.log(
+    `Rapport quotidien planifie : ${DIGEST_CRON} (${DIGEST_TIMEZONE})`
+  );
+}
