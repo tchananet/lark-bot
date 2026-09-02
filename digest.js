@@ -19,6 +19,11 @@ const MAX_FILE_BYTES = Number(process.env.DIGEST_MAX_FILE_BYTES || 15 * 1024 * 1
 // donc on limite le cumul brut a 12 Mo pour rester sous la barre.
 const MAX_TOTAL_BYTES = Number(process.env.DIGEST_MAX_TOTAL_BYTES || 12 * 1024 * 1024);
 
+// Timeout par tentative (pas pour la sequence complete) et nombre de
+// tentatives, initiale comprise.
+const DIGEST_TIMEOUT_MS = Number(process.env.DIGEST_TIMEOUT_MS || 120000);
+const DIGEST_RETRY_ATTEMPTS = Number(process.env.DIGEST_RETRY_ATTEMPTS || 4);
+
 // Types que Gemini lit nativement en inline.
 const INLINE_MIME = {
   ".jpg": "image/jpeg",
@@ -149,6 +154,47 @@ async function buildAttachmentParts(batch) {
 }
 
 
+function attendre(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+
+// On ne peut pas s'appuyer sur les retryOptions du SDK : il delegue a
+// p-retry, qui abandonne immediatement sur TypeError sauf pour quatre
+// messages propres aux navigateurs. Node lance "TypeError: fetch failed",
+// absent de cette liste, donc une coupure reseau n'est jamais retentee.
+async function generateWithRetry(ai, request) {
+  for (let attempt = 1; attempt <= DIGEST_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await ai.models.generateContent(request);
+    } catch (error) {
+      const status = error?.status;
+
+      // Pas de status = panne reseau ou timeout : on retente.
+      // Un 4xx (cle invalide, requete trop grosse) ne s'arrangera pas.
+      const retryable =
+        status === undefined ||
+        status === 408 ||
+        status === 429 ||
+        status >= 500;
+
+      if (!retryable || attempt === DIGEST_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      const delai = Math.min(30000, 5000 * 2 ** (attempt - 1));
+
+      console.warn(
+        `[digest] Tentative ${attempt}/${DIGEST_RETRY_ATTEMPTS} echouee ` +
+        `(${error?.message || error}). Nouvelle tentative dans ${delai / 1000}s.`
+      );
+
+      await attendre(delai);
+    }
+  }
+}
+
+
 async function buildDigest(date) {
   const batch = prepareDailyBatch(date);
 
@@ -162,7 +208,12 @@ async function buildDigest(date) {
     throw new Error("GEMINI_API_KEY absent de l'environnement");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({
+    apiKey,
+    // Borne chaque tentative. Le SDK s'en sert aussi pour relever les
+    // timeouts undici, qui sont a l'origine de UND_ERR_HEADERS_TIMEOUT.
+    httpOptions: { timeout: DIGEST_TIMEOUT_MS },
+  });
 
   const { parts, skipped, used } = await buildAttachmentParts(batch);
 
@@ -177,7 +228,7 @@ async function buildDigest(date) {
       `\nMESSAGES (JSON) :\n${JSON.stringify(batch.messages, null, 2)}`,
   };
 
-  const response = await ai.models.generateContent({
+  const response = await generateWithRetry(ai, {
     model: MODEL,
     contents: [{ role: "user", parts: [header, ...parts] }],
   });
@@ -228,7 +279,7 @@ async function runDigest(options = {}) {
       console.log("\n----- APERCU (non envoye) -----\n");
       console.log(text);
       console.log("\n-------------------------------\n");
-      return text;
+      return { status: "dry-run", text };
     }
 
     await sendDigestToLark(text);
@@ -237,6 +288,28 @@ async function runDigest(options = {}) {
     return { status: "sent", text };
   } catch (error) {
     console.error("[digest] Echec de generation du rapport :", error);
+
+    // Sans cela, un echec est indiscernable d'une journee sans message :
+    // dans les deux cas le groupe ne recoit rien.
+    // Un --dry-run ne doit evidemment rien publier, meme en cas d'echec.
+    if (dryRun) {
+      console.log("[digest] (dry-run) echec non signale dans Lark.");
+      return { status: "error", text: null };
+    }
+
+    try {
+      await sendDigestToLark(
+        `Rapport quotidien du ${date} : echec de generation.\n\n` +
+        `Cause : ${error?.message || error}\n\n` +
+        `Relancer manuellement avec la commande /rapport ${date}`
+      );
+    } catch (notifyError) {
+      console.error(
+        "[digest] Impossible de signaler l'echec dans Lark :",
+        notifyError?.message || notifyError
+      );
+    }
+
     return { status: "error", text: null };
   }
 }
