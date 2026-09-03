@@ -607,11 +607,10 @@ wsClient.start({
 });
 
 
-// Les comptes rendus d'une journee arrivent entre 17h le jour meme et 10h
-// le lendemain. Le rapport est donc genere a 10h30, une fois la fenetre
-// fermee, et porte sur la journee PRECEDENTE. Le generer a 18h reviendrait
-// a ignorer les envois du soir et ceux du lendemain matin.
-const DIGEST_CRON = process.env.DIGEST_CRON || "30 10 * * *";
+// Les comptes rendus d'une journee arrivent entre 17h le jour meme et 16h
+// le lendemain. Le rapport est donc genere a 17h15, une fois la fenetre
+// fermee, et porte sur la journee PRECEDENTE.
+const DIGEST_CRON = process.env.DIGEST_CRON || "15 17 * * *";
 const DIGEST_TIMEZONE = process.env.DIGEST_TIMEZONE || "Africa/Douala";
 
 if (process.env.DIGEST_ENABLED === "false") {

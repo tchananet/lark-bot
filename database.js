@@ -16,12 +16,13 @@ function localToday() {
   return db.prepare("SELECT DATE(CURRENT_TIMESTAMP, ?) AS d").get(TZ_OFFSET).d;
 }
 
-// Les comptes rendus d'une journee arrivent surtout entre 17h le jour meme
-// et 10h le lendemain. Une journee de rapport ne peut donc pas etre une
-// journee calendaire : le rapport du jour D couvre la fenetre
-// [D 10h00, D+1 10h00[. Les fenetres sont contigues, donc chaque message
-// appartient a une seule journee de rapport et rien n'est perdu.
-const WINDOW_START_HOUR = Number(process.env.DIGEST_WINDOW_START_HOUR || 10);
+// Les comptes rendus d'une journee arrivent entre 17h le jour meme et 16h
+// le lendemain. Une journee de rapport ne peut donc pas etre une journee
+// calendaire : le rapport du jour D couvre la fenetre [D 17h00, D+1 17h00[.
+// La fenetre va jusqu'a 17h et non 16h pour que les fenetres restent
+// contigues : sinon les messages recus entre 16h et 17h n'appartiendraient
+// a aucun rapport et seraient perdus.
+const WINDOW_START_HOUR = Number(process.env.DIGEST_WINDOW_START_HOUR || 17);
 
 function reportWindow(date) {
   const heure = String(WINDOW_START_HOUR).padStart(2, "0");

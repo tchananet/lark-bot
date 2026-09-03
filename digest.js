@@ -100,16 +100,24 @@ messages et des pièces jointes.
 Les noms que tu cites sont ceux qui apparaissent DANS les rapports (clients,
 collaborateurs concernés), jamais un identifiant technique.
 
-REGLE DE DATE
+REGLE DE DATE -- AUSSI IMPORTANTE QUE LA PRECEDENTE
+Le présent rapport porte sur UNE journée précise, indiquée plus bas.
 Les services transmettent leur compte rendu entre 17h le jour concerné et
-10h le lendemain. Un message reçu le matin porte donc presque toujours sur
-la journée de la veille : son heure d'arrivée n'indique pas la journée qu'il
-couvre.
-Si un compte rendu précise lui-même la journée qu'il concerne (par un titre,
-une date ou une mention explicite), c'est CETTE date qui fait foi.
-Si un compte rendu porte manifestement sur une autre journée que celle du
-présent rapport, ne l'intègre pas aux chiffres : signale-le en une ligne
-sous les points d'attention.
+16h le lendemain : un compte rendu reçu le matin ou l'après-midi porte donc
+presque toujours sur la journée de la VEILLE.
+
+L'heure d'arrivée d'un message n'indique JAMAIS la journée qu'il couvre. Ne
+t'y fie pas. Fie-toi à la date annoncée dans le compte rendu lui-même :
+titre, en-tête, mention "rapport du ...", "journée du ...", "activités du
+...", "hier", "ce jour", signature datée.
+
+- Compte rendu concernant la journée du rapport : intégré normalement.
+- Compte rendu concernant manifestement une AUTRE journée : NE PAS le
+  compter dans les indicateurs ni dans les sections de service. Signale-le
+  en une ligne sous les points d'attention, en précisant la journée qu'il
+  concerne, par exemple : Compte rendu du Service X portant sur la journée
+  du 30 août reçu hors période.
+- Compte rendu sans date explicite : rattaché à la journée du rapport.
 
 STRUCTURE ATTENDUE -- reproduis cette ossature en texte brut.
 
