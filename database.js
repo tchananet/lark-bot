@@ -81,6 +81,40 @@ db.exec(`
 `);
 
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS report_numbers (
+    report_date TEXT PRIMARY KEY,
+    number INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+
+// Le rapport porte un numero d'ordre administratif (N° 011 / AM / DRH / ADRH).
+// Une date donnee conserve toujours le meme numero, meme si le rapport est
+// regenere via /rapport : sinon le meme jour recevrait deux numeros.
+const NUMERO_DEPART = Number(process.env.RAPPORT_NUMERO_DEPART || 12);
+
+function allocateReportNumber(date) {
+  const existant = db.prepare(`
+    SELECT number FROM report_numbers WHERE report_date = ?
+  `).get(date);
+
+  if (existant) {
+    return existant.number;
+  }
+
+  const max = db.prepare(`SELECT MAX(number) AS n FROM report_numbers`).get().n;
+  const suivant = max === null ? NUMERO_DEPART : max + 1;
+
+  db.prepare(`
+    INSERT INTO report_numbers (report_date, number) VALUES (?, ?)
+  `).run(date, suivant);
+
+  return suivant;
+}
+
+
 function claimMessage(messageId) {
   // Déjà réellement enregistré auparavant ?
   const existingMessage = db.prepare(`
@@ -236,5 +270,6 @@ module.exports = {
     claimMessage,
     releaseMessage,
     localToday,
+    allocateReportNumber,
 
 };

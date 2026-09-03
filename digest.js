@@ -6,7 +6,7 @@ const Lark = require("@larksuiteoapi/node-sdk");
 const { GoogleGenAI } = require("@google/genai");
 
 const { prepareDailyBatch } = require("./batch");
-const { localToday } = require("./database");
+const { localToday, allocateReportNumber } = require("./database");
 const { extractWord } = require("./extractors");
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
@@ -42,35 +42,126 @@ const larkClient = new Lark.Client({
 });
 
 
-const PROMPT = `Tu rediges le rapport quotidien interne d'ALPHA MOTORS Cameroun.
+const MOIS_FR = [
+  "janvier", "février", "mars", "avril", "mai", "juin",
+  "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+];
 
-Tu recois les messages envoyes aujourd'hui par les collaborateurs via Lark,
-au format JSON, suivis des pieces jointes qu'ils ont transmises.
+const JOURS_FR = [
+  "dimanche", "lundi", "mardi", "mercredi",
+  "jeudi", "vendredi", "samedi",
+];
 
-Redige un rapport en francais, dans ce format exact :
+// "2026-09-01" -> "1er septembre 2026" / "mardi 1er septembre 2026"
+function dateEnFrancais(iso, avecJour = false) {
+  const [annee, mois, jour] = iso.split("-").map(Number);
+  const d = new Date(Date.UTC(annee, mois - 1, jour));
 
-RAPPORT QUOTIDIEN — <date en toutes lettres>
+  const quantieme = jour === 1 ? "1er" : String(jour);
+  const base = `${quantieme} ${MOIS_FR[mois - 1]} ${annee}`;
 
-<n> collaborateurs · <n> messages · <n> pieces jointes
+  return avecJour ? `${JOURS_FR[d.getUTCDay()]} ${base}` : base;
+}
 
-SYNTHESE
-<2 a 5 paragraphes courts. Regroupe par theme, pas par message. Cite les
-personnes par leur nom. Resume le contenu reel des pieces jointes que tu as
-recues, pas seulement leur nom de fichier.>
 
-A SUIVRE
-· <points qui demandent une action ou une decision, un par ligne>
-· <s'il n'y a rien a signaler, ecris "Rien a signaler.">
+// Le rapport ne doit RIEN devoir a l'expediteur Lark : un collaborateur
+// transmet souvent le compte rendu d'un autre service. On retire donc
+// toute identite d'expediteur avant d'envoyer les donnees au modele.
+function anonymiserMessages(batch) {
+  return batch.messages.map((message) => ({
+    heure: message.timestamp,
+    type: message.type,
+    texte: message.text,
+    pieces_jointes: message.attachments.map(
+      (piece) => piece.name || path.basename(piece.path || "")
+    ),
+  }));
+}
 
-Regles :
-- N'invente jamais un fait, un chiffre ou un nom qui n'apparait pas dans les donnees.
-- Si un expediteur est identifie par un identifiant technique (ou_...), ecris
-  "collaborateur non identifie" plutot que l'identifiant.
-- Ne recopie pas les messages un par un : synthetise.
-- Pas de markdown, pas d'asterisques, pas de dieses. Texte brut uniquement.
-- Reste factuel et sobre.
-- Rediges en francais correctement accentue (rapport, releve, echeance...),
-  meme si les consignes ci-dessus sont ecrites sans accents.`;
+
+const PROMPT = `Tu rédiges le rapport journalier consolidé des activités
+d'ALPHA MOTORS Cameroun, établi par la Direction des Ressources Humaines
+à l'attention de la Direction Générale.
+
+Tu reçois les comptes rendus transmis par les services via Lark : le texte
+des messages, puis les pièces jointes (rapports PDF, images, documents).
+
+REGLE D'IDENTIFICATION -- LA PLUS IMPORTANTE
+N'utilise JAMAIS l'expéditeur pour attribuer une activité : un collaborateur
+transmet fréquemment le compte rendu d'un autre service. Aucune information
+sur l'expéditeur ne t'est d'ailleurs fournie, et c'est voulu.
+Le service concerné et les personnes citées se déduisent UNIQUEMENT du
+contenu : en-têtes, intitulés, signatures et noms figurant dans le corps des
+messages et des pièces jointes.
+Les noms que tu cites sont ceux qui apparaissent DANS les rapports (clients,
+collaborateurs concernés), jamais un identifiant technique.
+
+STRUCTURE ATTENDUE -- reproduis cette ossature en texte brut.
+
+Commence par reproduire mot pour mot le bloc d'en-tête fourni plus bas,
+puis une ligne vide, puis le titre :
+RAPPORT JOURNALIER CONSOLIDÉ DES ACTIVITÉS – <DATE COUVERTE EN MAJUSCULES>
+puis une phrase d'introduction citant uniquement les services ayant
+réellement transmis un compte rendu, sur le modèle :
+Le présent rapport consolide les activités de <services> pour la journée du
+<jour et date>.
+
+01 Synthèse générale
+Une ligne par indicateur chiffré, au format :
+Libellé : valeur — lecture courte
+Ne retiens que les indicateurs réellement présents (visites showroom,
+proformas, essais, ventes, appels, messages traités, nouveaux prospects,
+rendez-vous fixés, injoignables, nous revient, pas intéressés, etc.).
+Calcule les totaux et taux de conversion quand les éléments le permettent,
+et précise la base du calcul.
+
+Puis une section numérotée par service ayant transmis un compte rendu, dans
+cet ordre lorsqu'ils sont présents : Direction Commerciale & Call Center,
+Service Informatique, Service Après-Vente, puis tout autre service.
+Pour un service d'activités, une puce par activité :
+• LIBELLÉ EN MAJUSCULES — description factuelle.
+Pour le Service Après-Vente, une puce par dossier client :
+• Nom du client — activité ou demande | Suite attendue : action.
+
+Ensuite, toujours dans la numérotation continue :
+
+<n> Points d'attention
+Une puce par point :
+• [HAUTE] Intitulé — constat.
+Priorités possibles : HAUTE, MOYENNE, BASSE.
+
+<n+1> Actions prioritaires
+Une puce par service :
+• SERVICE — actions concrètes à mener.
+
+<n+2> Conclusion
+Deux ou trois paragraphes : volume d'activité, ce qui a été concrétisé ou
+non, ce qui reste en suspens. Termine par exactement cette phrase :
+Le présent rapport est soumis à l'appréciation de la Direction Générale pour
+orientations et suites à donner.
+
+Puis, sur la dernière ligne, seule :
+LA DIRECTION DES RESSOURCES HUMAINES
+
+REGLES DE FOND
+- N'invente jamais un chiffre, un nom, un dossier ni une activité. Le rapport
+  ne contient que ce qui figure dans les données reçues.
+- Si aucun indicateur chiffré n'est disponible, écris sous 01 :
+  Aucun indicateur chiffré transmis ce jour.
+- Ne crée pas la section d'un service qui n'a rien transmis.
+- Si les données reçues ne sont manifestement pas des comptes rendus
+  d'activité (essais techniques, messages de test), dis-le explicitement
+  et n'invente pas de rapport.
+- Ne recopie pas les messages un par un : consolide par service et par thème.
+- Numérote les sections en continu à partir de 01, sur deux chiffres.
+- Texte brut uniquement : ni markdown, ni astérisques, ni dièses, ni tableaux.
+- Français administratif sobre, à la troisième personne, correctement
+  accentué.
+- TYPOGRAPHIE : les intitulés de section s'écrivent en casse normale
+  accentuée (01 Synthèse générale, 04 Service Après-Vente, 05 Points
+  d'attention), jamais en capitales. Seuls le titre du rapport et les
+  libellés d'activité sont en capitales. Utilise la puce • et le tiret
+  cadratin — comme séparateur.`;
 
 
 async function buildAttachmentParts(batch) {
@@ -111,7 +202,7 @@ async function buildAttachmentParts(batch) {
 
       if (mimeType) {
         parts.push({
-          text: `\n--- Piece jointe de ${message.sender.name} : ${label} ---`,
+          text: `\n--- Piece jointe : ${label} ---`,
         });
         parts.push({
           inlineData: {
@@ -138,7 +229,7 @@ async function buildAttachmentParts(batch) {
 
         parts.push({
           text:
-            `\n--- Piece jointe de ${message.sender.name} : ${label} ` +
+            `\n--- Piece jointe : ${label} ` +
             `(texte extrait) ---\n${extracted}`,
         });
         used++;
@@ -217,15 +308,25 @@ async function buildDigest(date) {
 
   const { parts, skipped, used } = await buildAttachmentParts(batch);
 
+  const numero = allocateReportNumber(batch.date);
+  const villeSiege = process.env.RAPPORT_VILLE || "Yaoundé";
+
+  const enTete =
+    `N° ${String(numero).padStart(3, "0")} / AM / DRH / ADRH\n` +
+    `${villeSiege}, le ${dateEnFrancais(localToday())}`;
+
   const header = {
     text:
       `${PROMPT}\n\n` +
-      `Date du rapport : ${batch.date}\n` +
-      `Nombre de pieces jointes transmises ci-dessous : ${used}\n` +
+      `BLOC D'EN-TETE A REPRODUIRE MOT POUR MOT :\n${enTete}\n\n` +
+      `Date couverte par le rapport : ${dateEnFrancais(batch.date, true)}\n` +
+      `Date couverte en majuscules : ${dateEnFrancais(batch.date).toUpperCase()}\n` +
+      `Nombre de pieces jointes fournies ci-dessous : ${used}\n` +
       (skipped.length
         ? `Pieces jointes non transmises : ${skipped.join(", ")}\n`
         : "") +
-      `\nMESSAGES (JSON) :\n${JSON.stringify(batch.messages, null, 2)}`,
+      `\nCOMPTES RENDUS RECUS (JSON, sans identite d'expediteur) :\n` +
+      `${JSON.stringify(anonymiserMessages(batch), null, 2)}`,
   };
 
   const response = await generateWithRetry(ai, {
