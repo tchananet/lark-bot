@@ -1,10 +1,15 @@
-const { getDailyBatch, localToday } = require("./database");
+const { getDailyBatch, localReportDate, reportWindow } = require("./database");
 
 function prepareDailyBatch(date = null) {
-  const messages = getDailyBatch(date);
+  const reportDate = date || localReportDate();
+  const messages = getDailyBatch(reportDate);
+  const fenetre = reportWindow(reportDate);
 
   return {
-    date: date || localToday(),
+    date: reportDate,
+
+    // Fenetre de collecte reellement couverte par ce rapport.
+    fenetre,
 
     total_messages: messages.length,
 

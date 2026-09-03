@@ -16,6 +16,31 @@ function localToday() {
   return db.prepare("SELECT DATE(CURRENT_TIMESTAMP, ?) AS d").get(TZ_OFFSET).d;
 }
 
+// Les comptes rendus d'une journee arrivent surtout entre 17h le jour meme
+// et 10h le lendemain. Une journee de rapport ne peut donc pas etre une
+// journee calendaire : le rapport du jour D couvre la fenetre
+// [D 10h00, D+1 10h00[. Les fenetres sont contigues, donc chaque message
+// appartient a une seule journee de rapport et rien n'est perdu.
+const WINDOW_START_HOUR = Number(process.env.DIGEST_WINDOW_START_HOUR || 10);
+
+function reportWindow(date) {
+  const heure = String(WINDOW_START_HOUR).padStart(2, "0");
+  const debut = `${date} ${heure}:00:00`;
+
+  const fin = db.prepare(
+    "SELECT DATETIME(?, '+1 day') AS f"
+  ).get(debut).f;
+
+  return { debut, fin };
+}
+
+// Derniere journee de rapport dont la fenetre est completement fermee.
+function localReportDate() {
+  return db.prepare(
+    "SELECT DATE(CURRENT_TIMESTAMP, ?, ?, '-1 day') AS d"
+  ).get(TZ_OFFSET, `-${WINDOW_START_HOUR} hours`).d;
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,7 +174,8 @@ function releaseMessage(messageId) {
 
 
 function getDailyBatch(date = null) {
-  const targetDate = date || localToday();
+  const targetDate = date || localReportDate();
+  const { debut, fin } = reportWindow(targetDate);
 
   const messages = db.prepare(`
     SELECT
@@ -161,9 +187,10 @@ function getDailyBatch(date = null) {
     FROM messages m
     LEFT JOIN users u
       ON u.open_id = m.sender_id
-    WHERE DATE(m.created_at, ?) = ?
+    WHERE DATETIME(m.created_at, ?) >= ?
+      AND DATETIME(m.created_at, ?) < ?
     ORDER BY m.created_at ASC
-  `).all(TZ_OFFSET, TZ_OFFSET, targetDate);
+  `).all(TZ_OFFSET, TZ_OFFSET, debut, TZ_OFFSET, fin);
 
   const attachmentQuery = db.prepare(`
     SELECT *
@@ -271,5 +298,7 @@ module.exports = {
     releaseMessage,
     localToday,
     allocateReportNumber,
+    localReportDate,
+    reportWindow,
 
 };

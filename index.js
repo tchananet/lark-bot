@@ -10,7 +10,7 @@ const {
   saveMessage,
   saveAttachment,  saveUser,   claimMessage,
   releaseMessage,
-  localToday,
+  localReportDate,
 
 } = require("./database");
 
@@ -299,7 +299,7 @@ async function handleMessage(data) {
         return;
       }
 
-      const cible = rapportCommand.date || localToday();
+      const cible = rapportCommand.date || localReportDate();
 
       console.log(`[commande] /rapport demande pour le ${cible}`);
 
@@ -607,8 +607,11 @@ wsClient.start({
 });
 
 
-// Rapport quotidien : 18h heure du Cameroun par defaut.
-const DIGEST_CRON = process.env.DIGEST_CRON || "0 18 * * *";
+// Les comptes rendus d'une journee arrivent entre 17h le jour meme et 10h
+// le lendemain. Le rapport est donc genere a 10h30, une fois la fenetre
+// fermee, et porte sur la journee PRECEDENTE. Le generer a 18h reviendrait
+// a ignorer les envois du soir et ceux du lendemain matin.
+const DIGEST_CRON = process.env.DIGEST_CRON || "30 10 * * *";
 const DIGEST_TIMEZONE = process.env.DIGEST_TIMEZONE || "Africa/Douala";
 
 if (process.env.DIGEST_ENABLED === "false") {
@@ -621,6 +624,7 @@ if (process.env.DIGEST_ENABLED === "false") {
   });
 
   console.log(
-    `Rapport quotidien planifie : ${DIGEST_CRON} (${DIGEST_TIMEZONE})`
+    `Rapport quotidien planifie : ${DIGEST_CRON} (${DIGEST_TIMEZONE}), ` +
+    "portant sur la journee precedente"
   );
 }

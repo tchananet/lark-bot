@@ -6,7 +6,11 @@ const Lark = require("@larksuiteoapi/node-sdk");
 const { GoogleGenAI } = require("@google/genai");
 
 const { prepareDailyBatch } = require("./batch");
-const { localToday, allocateReportNumber } = require("./database");
+const {
+  localToday,
+  localReportDate,
+  allocateReportNumber,
+} = require("./database");
 const { extractWord } = require("./extractors");
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
@@ -96,6 +100,17 @@ messages et des pièces jointes.
 Les noms que tu cites sont ceux qui apparaissent DANS les rapports (clients,
 collaborateurs concernés), jamais un identifiant technique.
 
+REGLE DE DATE
+Les services transmettent leur compte rendu entre 17h le jour concerné et
+10h le lendemain. Un message reçu le matin porte donc presque toujours sur
+la journée de la veille : son heure d'arrivée n'indique pas la journée qu'il
+couvre.
+Si un compte rendu précise lui-même la journée qu'il concerne (par un titre,
+une date ou une mention explicite), c'est CETTE date qui fait foi.
+Si un compte rendu porte manifestement sur une autre journée que celle du
+présent rapport, ne l'intègre pas aux chiffres : signale-le en une ligne
+sous les points d'attention.
+
 STRUCTURE ATTENDUE -- reproduis cette ossature en texte brut.
 
 Commence par reproduire mot pour mot le bloc d'en-tête fourni plus bas,
@@ -113,7 +128,8 @@ Ne retiens que les indicateurs réellement présents (visites showroom,
 proformas, essais, ventes, appels, messages traités, nouveaux prospects,
 rendez-vous fixés, injoignables, nous revient, pas intéressés, etc.).
 Calcule les totaux et taux de conversion quand les éléments le permettent,
-et précise la base du calcul.
+et précise la base du calcul. Le taux de conversion de référence est
+appels vers rendez-vous, soit rendez-vous fixés divisés par appels émis.
 
 Puis une section numérotée par service ayant transmis un compte rendu, dans
 cet ordre lorsqu'ils sont présents : Direction Commerciale & Call Center,
@@ -320,6 +336,9 @@ async function buildDigest(date) {
       `${PROMPT}\n\n` +
       `BLOC D'EN-TETE A REPRODUIRE MOT POUR MOT :\n${enTete}\n\n` +
       `Date couverte par le rapport : ${dateEnFrancais(batch.date, true)}\n` +
+      `Fenetre de collecte (heure locale) : du ${batch.fenetre.debut} ` +
+      `au ${batch.fenetre.fin}, les comptes rendus arrivant surtout le soir ` +
+      `et le lendemain matin.\n` +
       `Date couverte en majuscules : ${dateEnFrancais(batch.date).toUpperCase()}\n` +
       `Nombre de pieces jointes fournies ci-dessous : ${used}\n` +
       (skipped.length
@@ -357,7 +376,7 @@ async function sendDigestToLark(text) {
 
 
 async function runDigest(options = {}) {
-  const date = options.date || localToday();
+  const date = options.date || localReportDate();
   const dryRun = options.dryRun === true;
 
   console.log(`[digest] Preparation du rapport du ${date}`);
