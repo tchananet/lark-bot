@@ -121,6 +121,13 @@ db.exec(`
   )
 `);
 
+// Ajout retro-compatible sur les bases deja creees.
+try {
+  db.exec(`ALTER TABLE attendance ADD COLUMN champs_incertains TEXT`);
+} catch (erreur) {
+  // La colonne existe deja.
+}
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_shift_date ON shift_schedule(date)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_absences_emp ON absences(employee_id)`);
@@ -318,8 +325,9 @@ function enregistrerPointage(donnees) {
   return db.prepare(`
     INSERT INTO attendance
       (employee_id, date, heure_arrivee, heure_depart, heure_depart_pause,
-       heure_retour_pause, observation, source_document_id, certitude)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       heure_retour_pause, observation, source_document_id, certitude,
+       champs_incertains)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(employee_id, date) DO UPDATE SET
       heure_arrivee = excluded.heure_arrivee,
       heure_depart = excluded.heure_depart,
@@ -327,7 +335,8 @@ function enregistrerPointage(donnees) {
       heure_retour_pause = excluded.heure_retour_pause,
       observation = excluded.observation,
       source_document_id = excluded.source_document_id,
-      certitude = excluded.certitude
+      certitude = excluded.certitude,
+      champs_incertains = excluded.champs_incertains
   `).run(
     donnees.employee_id,
     donnees.date,
@@ -337,7 +346,8 @@ function enregistrerPointage(donnees) {
     normaliserHeure(donnees.heure_retour_pause),
     donnees.observation || null,
     donnees.source_document_id || null,
-    donnees.certitude || "CONFIRMEE"
+    donnees.certitude || "CONFIRMEE",
+    (donnees.champs_incertains || []).join(",") || null
   );
 }
 

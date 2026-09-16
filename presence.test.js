@@ -184,4 +184,38 @@ verifier("une heure illisible ne doit pas se lire comme minuit", () => {
   assert.ok(/arrivee non signee/.test(r.note));
 });
 
+// --- Prudence pres du seuil -------------------------------------------------
+
+verifier("un retard serre invite a verifier la fiche papier", () => {
+  const r = ligne({ heure_arrivee: "08h50", heure_depart: "18h00" });
+
+  assert.strictEqual(r.statut, STATUTS.RETARD);
+  assert.strictEqual(r.retard_minutes, 20);
+  assert.ok(/Verifier la fiche papier/.test(r.note || ""));
+});
+
+verifier("un retard franc n'a pas besoin de cette reserve", () => {
+  const r = ligne({ heure_arrivee: "09h20", heure_depart: "18h00" });
+
+  assert.strictEqual(r.statut, STATUTS.RETARD);
+  assert.strictEqual(r.note, null);
+});
+
+verifier("un retard serre mais justifie ne demande pas de verification", () => {
+  const r = ligne({
+    heure_arrivee: "08h50",
+    heure_depart: "18h00",
+    absence: { type: "PERMISSION", motif: "banque" },
+  });
+
+  assert.strictEqual(r.note, null, "le motif est connu, la lecture importe peu");
+});
+
+verifier("une case illisible n'est pas presentee comme non signee", () => {
+  const r = ligne({ heure_arrivee: "08h07", champs_incertains: ["heure_depart"] });
+
+  assert.ok(/illisible/.test(r.note));
+  assert.ok(!/non signee/.test(r.note), "la personne a signe, c'est la lecture qui echoue");
+});
+
 console.log(`${reussis} verifications passees.`);

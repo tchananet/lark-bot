@@ -21,6 +21,10 @@ const DEPART_SOIR = process.env.RH_HEURE_DEPART_SOIR || "20:00";
 const TOLERANCE = Number(process.env.RH_TOLERANCE_MINUTES || 15);
 const SEUIL_ANOMALIE = Number(process.env.RH_SEUIL_ANOMALIE_MINUTES || 60);
 
+// En deca de cette marge au-dessus du seuil, un retard est juge trop serre
+// pour etre affirme sans verifier la fiche papier.
+const MARGE_VERIFICATION = Number(process.env.RH_MARGE_VERIFICATION_MINUTES || 15);
+
 const STATUTS = {
   OK: "OK",
   RETARD: "RETARD",
@@ -96,13 +100,21 @@ function evaluerLigne(contexte) {
   // Une seule des deux signatures : la personne etait la, la feuille est
   // incomplete. C'est un defaut de saisie, pas un fait de presence.
   if (arrivee === null || depart === null) {
+    const manquant = arrivee === null ? "heure_arrivee" : "heure_depart";
+    const libelle = arrivee === null ? "arrivee" : "depart";
+
+    // Une case illisible n'est pas une case non signee : dire a quelqu'un
+    // qu'il n'a pas signe alors que sa signature est la, simplement mal
+    // lue, serait un reproche infonde.
+    const illisible = (contexte.champs_incertains || []).includes(manquant);
+
     return {
       ...base,
       statut: STATUTS.OK,
       detail: arrivee === null ? `depart ${heure_depart}` : `arrivee ${heure_arrivee}`,
-      note: arrivee === null
-        ? `${nom} : heure d'arrivee non signee`
-        : `${nom} : heure de depart non signee`,
+      note: illisible
+        ? `${nom} : heure de ${libelle} illisible sur la fiche, a verifier`
+        : `${nom} : heure de ${libelle} non signee`,
     };
   }
 
@@ -130,6 +142,13 @@ function evaluerLigne(contexte) {
   }
 
   if (retard > TOLERANCE) {
+    // Deux lectures concordantes peuvent se tromper ensemble : sur la fiche
+    // reelle, 08h22 a ete lu 08h09 par les deux passes. L'erreur n'a de
+    // consequence que pres du seuil, la ou quelques minutes font basculer le
+    // verdict. On ne reproche donc jamais un retard serre sans inviter a
+    // verifier la fiche papier.
+    const marge = retard - TOLERANCE;
+
     return {
       ...base,
       statut: STATUTS.RETARD,
@@ -138,6 +157,9 @@ function evaluerLigne(contexte) {
       motif,
       detail: `${retard} min de retard (attendu ${enTexte(arriveePrevue)})`
         + (justifie ? ` (${motif})` : ""),
+      note: marge <= MARGE_VERIFICATION && !justifie
+        ? `${nom} : retard de ${retard} min, proche du seuil. Verifier la fiche papier avant toute suite.`
+        : null,
     };
   }
 
@@ -167,6 +189,7 @@ function evaluerJournee(date) {
         employee_id: employe.id,
         heure_arrivee: pointage.heure_arrivee,
         heure_depart: pointage.heure_depart,
+        champs_incertains: (pointage.champs_incertains || "").split(",").filter(Boolean),
         de_soir_ce_jour: estDeSoir(employe.id, date),
         de_soir_la_veille: estDeSoir(employe.id, veille),
         absence: absencePour(employe.id, date),
