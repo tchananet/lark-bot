@@ -50,6 +50,9 @@ for (const [colonne, type] of [
   ["prenom", "TEXT"],
   ["nom_famille", "TEXT"],
   ["nom_usuel", "TEXT"],
+  // "individuel" ou "collectif" : SERVICE RENNOVA signe comme une equipe
+  // et doit etre suivi sans entrer dans la ponctualite individuelle.
+  ["type", "TEXT DEFAULT 'individuel'"],
 ]) {
   if (!colonnesExistantes.has(colonne)) {
     db.exec(`ALTER TABLE employees ADD COLUMN ${colonne} ${type}`);
@@ -160,7 +163,7 @@ const SEUIL_PROBABLE = Number(process.env.EMPLOYEE_MATCH_SEUIL || 0.85);
 function employesActifs() {
   return db.prepare(`
     SELECT id, matricule, nom_complet, nom_normalise,
-           prenom, nom_famille, nom_usuel, service, poste
+           prenom, nom_famille, nom_usuel, type, service, poste
     FROM employees
     WHERE actif = 1
   `).all();
@@ -221,10 +224,16 @@ function matchEmployee(nomBrut) {
         return false;
       }
 
-      // "MARIE S." ne doit retenir que les Marie dont le nom de famille
-      // commence par S : c'est ce qui separe deux homonymes de prenom.
-      return doc.initiales.every(
-        (initiale) => famille !== "" && famille.startsWith(initiale)
+      // L'initiale peut viser le nom de famille comme un second prenom :
+      // "MARIE S." designe Marie Sharone ETOUNA. On la cherche donc parmi
+      // tous les composants du nom, hors ceux deja consommes par les
+      // jetons lus.
+      const restants = jetonsDe(employe.nom_normalise).filter(
+        (jeton) => !doc.jetons.includes(jeton)
+      );
+
+      return doc.initiales.every((initiale) =>
+        restants.some((jeton) => jeton.startsWith(initiale))
       );
     });
 
@@ -259,7 +268,9 @@ function matchEmployee(nomBrut) {
   const jetonsCompatibles = (lu, attendu) =>
     lu === attendu ||
     (lu.length >= 3 && attendu.endsWith(lu)) ||
-    (attendu.length >= 3 && lu.endsWith(attendu));
+    (attendu.length >= 3 && lu.endsWith(attendu)) ||
+    (lu.length >= 4 && attendu.startsWith(lu)) ||
+    (attendu.length >= 4 && lu.startsWith(attendu));
 
   const couvre = (source, cible) =>
     source.every((jeton) => cible.some((autre) => jetonsCompatibles(jeton, autre)));
@@ -303,7 +314,12 @@ function matchEmployee(nomBrut) {
 
   for (const jeton of jetonsCherches.filter((j) => j.length >= 4)) {
     const trouves = actifs.filter((employe) =>
-      jetonsDe(employe.nom_normalise).includes(jeton)
+      jetonsDe(employe.nom_normalise).some(
+        (autre) =>
+          autre === jeton ||
+          (jeton.length >= 4 && autre.startsWith(jeton)) ||
+          (autre.length >= 4 && jeton.startsWith(autre))
+      )
     );
 
     if (trouves.length === 1) {
@@ -395,9 +411,9 @@ function upsertEmployee(data) {
   return db.prepare(`
     INSERT INTO employees (
       matricule, nom_complet, nom_normalise,
-      prenom, nom_famille, nom_usuel, service, poste, actif
+      prenom, nom_famille, nom_usuel, type, service, poste, actif
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 
     ON CONFLICT(nom_normalise) DO UPDATE SET
       matricule = COALESCE(excluded.matricule, matricule),
@@ -405,6 +421,7 @@ function upsertEmployee(data) {
       prenom = COALESCE(excluded.prenom, prenom),
       nom_famille = COALESCE(excluded.nom_famille, nom_famille),
       nom_usuel = COALESCE(excluded.nom_usuel, nom_usuel),
+      type = COALESCE(excluded.type, type),
       service = COALESCE(excluded.service, service),
       poste = COALESCE(excluded.poste, poste),
       updated_at = CURRENT_TIMESTAMP
@@ -415,6 +432,7 @@ function upsertEmployee(data) {
     data.prenom || null,
     data.nom_famille || null,
     data.nom_usuel || null,
+    data.type || "individuel",
     data.service || null,
     data.poste || null
   );
@@ -452,6 +470,7 @@ function importerCsv(chemin, separateur = ";") {
   const iPrenom = colonne("prenom", "prénom");
   const iFamille = colonne("nom_famille", "nom de famille");
   const iUsuel = colonne("nom_usuel", "nom usuel");
+  const iType = colonne("type");
 
   let importes = 0;
   const ignores = [];
@@ -468,6 +487,7 @@ function importerCsv(chemin, separateur = ";") {
         prenom: iPrenom === -1 ? null : champs[iPrenom],
         nom_famille: iFamille === -1 ? null : champs[iFamille],
         nom_usuel: iUsuel === -1 ? null : champs[iUsuel],
+        type: iType === -1 ? null : champs[iType],
       });
 
       importes++;
