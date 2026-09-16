@@ -14,6 +14,11 @@ services:
       LARK_REPORT_CHAT_ID: ${LARK_REPORT_CHAT_ID}
       LARK_APP_ID: ${LARK_APP_ID}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      MISTRAL_API: ${MISTRAL_API}
+
+      # Identifiant Lark de la DRH. Sans lui, la reconnaissance retombe sur
+      # le libelle du profil, qui peut etre maquille.
+      LARK_RH_OPEN_ID: ${LARK_RH_OPEN_ID:-}
       TZ: Africa/Douala
 
     volumes:
