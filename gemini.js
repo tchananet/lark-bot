@@ -2,7 +2,10 @@ require("dotenv").config();
 
 const { GoogleGenAI } = require("@google/genai");
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+// flash-lite : 0,7 s contre 1,7 s pour flash sur nos taches, et surtout des
+// quotas gratuits bien plus larges. Le palier gemini-3.6-flash plafonnait a
+// 20 requetes par jour, ce qui ne tient pas une seule journee de travail.
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
 const TIMEOUT_MS = Number(process.env.DIGEST_TIMEOUT_MS || 120000);
 const TENTATIVES = Number(process.env.DIGEST_RETRY_ATTEMPTS || 4);

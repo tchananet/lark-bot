@@ -4,6 +4,7 @@ const path = require("path");
 const { GoogleGenAI } = require("@google/genai");
 const { genererJson } = require("./gemini");
 const { normaliserHeure } = require("./temps");
+const { lirePointage: lireOcrMistral } = require("./mistral");
 const {
   listerEmployes,
   resoudreEmploye,
@@ -173,6 +174,34 @@ async function lirePointageUnePasse(chemin, ai) {
 }
 
 
+// Premiere lecture : moteur OCR dedie de Mistral. Ramenee exactement a la
+// meme forme que la lecture Gemini, pour que la confrontation ignore d'ou
+// vient chaque version.
+async function lirePointageMistral(chemin) {
+  const pages = await lireOcrMistral(chemin);
+  const parJour = new Map();
+
+  for (const page of pages) {
+    const lignes = parJour.get(page.date) || new Map();
+
+    for (const ligne of page.lignes) {
+      lignes.set(cleNom(ligne.nom), {
+        nom: ligne.nom.trim(),
+        heure_arrivee: normaliserHeure(ligne.heure_arrivee),
+        heure_depart_pause: normaliserHeure(ligne.heure_depart_pause),
+        heure_retour_pause: normaliserHeure(ligne.heure_retour_pause),
+        heure_depart: normaliserHeure(ligne.heure_depart),
+        observation: (ligne.observation || "").trim() || null,
+      });
+    }
+
+    parJour.set(page.date, lignes);
+  }
+
+  return parJour;
+}
+
+
 // Confronte deux lectures. Ce sur quoi elles s'accordent est retenu ; tout
 // desaccord part en revue plutot que d'entrer dans les chiffres.
 function confronter(passeA, passeB) {
@@ -246,10 +275,15 @@ function confronter(passeA, passeB) {
 async function extrairePointage(chemin, options = {}) {
   const documentId = options.documentId || null;
 
-  const ai = clientExtraction();
-
-  const passeA = await lirePointageUnePasse(chemin, ai);
-  const passeB = await lirePointageUnePasse(chemin, ai);
+  // Deux MOTEURS differents, pas deux passes du meme modele : deux lectures
+  // d'un meme modele partagent les memes angles morts et se trompent
+  // ensemble. Sur la fiche du 15/09, Gemini a lu deux fois 08h02 puis 08h09
+  // la ou il fallait lire 08h22 ; Mistral lit 08h22. Un desaccord entre
+  // moteurs signale precisement les cellules reellement ambigues.
+  const [passeA, passeB] = await Promise.all([
+    lirePointageMistral(chemin),
+    lirePointageUnePasse(chemin, clientExtraction()),
+  ]);
 
   const { retenus, divergences } = confronter(passeA, passeB);
 
@@ -437,4 +471,5 @@ module.exports = {
   classerDocument,
   confronter,
   lirePointageUnePasse,
+  lirePointageMistral,
 };
