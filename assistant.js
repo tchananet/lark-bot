@@ -8,6 +8,10 @@ const {
   enregistrerAbsence,
   revuesEnAttente,
   corrigerPointage,
+  comptesLarkPour,
+  accorderRoleRH,
+  retirerRoleRH,
+  listerRH,
 } = require("./hr");
 
 // ---------------------------------------------------------------------------
@@ -246,6 +250,84 @@ async function traiterCorrections(corrections, expediteur, repondre) {
 }
 
 
+// Habiliter quelqu'un porte sur son COMPTE Lark, jamais sur son nom. Or
+// Lark ne livre un open_id qu'avec un message : tant que la personne n'a
+// pas ecrit au bot, son compte est inconnu et rien ne peut lui etre
+// accorde. C'est une contrainte de la plateforme, pas un oubli.
+async function traiterAcces(acces, expediteur, repondre) {
+  const { parConfig, enBase } = listerRH();
+
+  if (acces.action === "LISTER") {
+    const lignes = enBase.map(
+      (e) => `- ${e.nom_complet}${e.lark_open_id ? "" : " (compte Lark non encore relie)"}`
+    );
+
+    await repondre(
+      (lignes.length
+        ? `Personnes habilitees :\n${lignes.join("\n")}`
+        : "Aucune habilitation enregistree en base.") +
+      (parConfig.length
+        ? `\n\n${parConfig.length} compte(s) habilite(s) par la configuration du serveur.`
+        : "")
+    );
+    return;
+  }
+
+  const { employe } = resoudreEmploye(acces.personne);
+
+  if (!employe) {
+    await repondre(
+      `${acces.personne} : nom inconnu du registre du personnel. ` +
+      `Aucune habilitation n'a ete modifiee.`
+    );
+    return;
+  }
+
+  if (acces.action === "RETIRER") {
+    retirerRoleRH(employe.id);
+
+    // La liste de configuration prime sur la base : le dire franchement
+    // plutot que d'annoncer une revocation qui n'a pas eu lieu.
+    const parLaConfig = employe.lark_open_id && parConfig.includes(employe.lark_open_id);
+
+    await repondre(
+      parLaConfig
+        ? `${employe.nom_complet} : habilitation retiree en base, mais son ` +
+          `compte reste autorise par la configuration du serveur ` +
+          `(LARK_RH_OPEN_ID). Il faut l'y enlever pour que ce soit effectif.`
+        : `${employe.nom_complet} n'a plus acces a l'assistant.`
+    );
+    return;
+  }
+
+  const comptes = comptesLarkPour(employe.id);
+
+  if (!comptes.length) {
+    await repondre(
+      `${employe.nom_complet} : je ne connais pas encore son compte Lark. ` +
+      `Demandez-lui d'ecrire un message au bot, puis redemandez-moi de ` +
+      `l'habiliter.`
+    );
+    return;
+  }
+
+  if (comptes.length > 1) {
+    await repondre(
+      `${employe.nom_complet} : plusieurs comptes Lark correspondent ` +
+      `(${comptes.map((c) => c.name).join(", ")}). Precisez lequel habiliter.`
+    );
+    return;
+  }
+
+  accorderRoleRH(employe.id, comptes[0].open_id);
+
+  await repondre(
+    `${employe.nom_complet} peut desormais dialoguer avec l'assistant. ` +
+    `Habilitation accordee par ${expediteur.nom || "la DRH"}.`
+  );
+}
+
+
 async function traiterDemandeRapport(date, repondre) {
   const cible = date || localReportDate();
 
@@ -289,6 +371,12 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
 
     case "CORRECTION":
       await traiterCorrections(analyse.corrections, expediteur, repondre);
+      return analyse;
+
+    case "GESTION_ACCES":
+      if (analyse.acces) {
+        await traiterAcces(analyse.acces, expediteur, repondre);
+      }
       return analyse;
 
     case "DEMANDE_RAPPORT":

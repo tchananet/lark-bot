@@ -27,6 +27,7 @@ const INTENTIONS = [
   "PERMISSION",
   "CORRECTION",
   "DEMANDE_RAPPORT",
+  "GESTION_ACCES",
   "AUTRE",
 ];
 
@@ -74,6 +75,14 @@ const SCHEMA = {
         required: ["personne", "date", "champ", "valeur"],
       },
     },
+    acces: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["AJOUTER", "RETIRER", "LISTER", "AUCUNE"] },
+        personne: { type: "string" },
+      },
+      required: ["action", "personne"],
+    },
     rapport_date: { type: "string" },
   },
   required: [
@@ -82,6 +91,7 @@ const SCHEMA = {
     "explication",
     "absences",
     "corrections",
+    "acces",
     "rapport_date",
   ],
 };
@@ -109,6 +119,10 @@ CORRECTION : le message rectifie une heure lue sur la fiche de presence.
   08h22", "Gloria a fini a 17h46".
 DEMANDE_RAPPORT : le message reclame un rapport, une synthese ou un
   recapitulatif, pour une date donnee ou pour la derniere journee.
+GESTION_ACCES : le message demande d habiliter quelqu un a dialoguer avec
+  l assistant, de lui retirer cette habilitation, ou de savoir qui en
+  dispose. Exemples : "ajoute Gloria aux RH", "Isabelle peut aussi utiliser
+  le bot", "retire Ben des RH", "qui a acces au bot ?".
 AUTRE : tout le reste, y compris les salutations et les messages sans objet.
 
 NE CONFONDS PAS PERMISSION ET CORRECTION
@@ -136,6 +150,11 @@ corrections : une entree par heure rectifiee, uniquement pour CORRECTION.
     laisse une chaine vide : la journee sera deduite des cellules en
     attente. N'invente jamais une date pour combler le champ.
   Laisse la liste vide pour toute intention autre que CORRECTION.
+acces : uniquement pour GESTION_ACCES.
+  action : AJOUTER pour habiliter, RETIRER pour revoquer, LISTER pour
+    enumerer les personnes habilitees. AUCUNE sinon.
+  personne : le nom cite, recopie tel quel. Chaine vide pour LISTER.
+  Pour toute autre intention, action vaut AUCUNE et personne une chaine vide.
 rapport_date : la journee demandee, au format AAAA-MM-JJ, uniquement pour
   DEMANDE_RAPPORT. Chaine vide si aucune date n'est precisee ou si
   l'intention est autre.
@@ -197,6 +216,10 @@ async function analyser({ texte = "", fichiers = [] } = {}) {
     absences: (analyse.absences || []).filter(
       (a) => a.personne && /^\d{4}-\d{2}-\d{2}$/.test(a.date_debut || "")
     ),
+    acces:
+      analyse.acces && analyse.acces.action && analyse.acces.action !== "AUCUNE"
+        ? analyse.acces
+        : null,
     rapport_date: /^\d{4}-\d{2}-\d{2}$/.test(analyse.rapport_date || "")
       ? analyse.rapport_date
       : null,

@@ -283,18 +283,26 @@ function ajouterAlias(employeeId, alias, source) {
 // Seule la DRH dialogue avec le bot. Tout le monde peut deposer des
 // documents, mais personne d'autre ne recoit de reponse, et personne
 // d'autre ne peut declarer une permission au nom d'un tiers.
-function estRH(expediteur = {}) {
-  const autorises = (process.env.LARK_RH_OPEN_ID || "")
+function comptesAutorisesParConfig() {
+  return (process.env.LARK_RH_OPEN_ID || "")
     .split(",")
     .map((valeur) => valeur.trim())
     .filter(Boolean);
+}
 
-  // Une liste explicite d'identifiants Lark fait autorite : c'est le seul
-  // critere qu'un libelle de profil ne peut pas usurper.
-  if (autorises.length) {
-    return autorises.includes(expediteur.open_id);
+
+function estRH(expediteur = {}) {
+  const autorises = comptesAutorisesParConfig();
+
+  // Liste de configuration : le socle, qui ne depend d'aucune donnee saisie
+  // et permet de reprendre la main si la base est mal renseignee.
+  if (expediteur.open_id && autorises.includes(expediteur.open_id)) {
+    return true;
   }
 
+  // Habilitations accordees en cours de route. Elles portent sur un compte
+  // Lark, jamais sur un nom : un libelle de profil se maquille, un open_id
+  // non.
   if (expediteur.open_id) {
     const parCompte = db.prepare(`
       SELECT 1 FROM employees WHERE lark_open_id = ? AND role = 'RH'
@@ -305,13 +313,52 @@ function estRH(expediteur = {}) {
     }
   }
 
-  if (!expediteur.nom) {
+  // Repli sur le nom uniquement tant qu'AUCUNE liste n'est configuree, pour
+  // qu'une installation neuve ne soit pas verrouillee. Des que
+  // LARK_RH_OPEN_ID est renseigne, le nom ne donne plus aucun acces.
+  if (autorises.length || !expediteur.nom) {
     return false;
   }
 
   const { employe } = resoudreEmploye(expediteur.nom);
 
   return !!employe && employe.role === "RH";
+}
+
+
+// Comptes Lark ayant deja ecrit au bot et dont le nom de profil correspond a
+// cet employe. C'est la seule facon de connaitre un open_id : Lark ne le
+// livre qu'avec un message.
+function comptesLarkPour(employeeId) {
+  return db.prepare(`SELECT open_id, name FROM users WHERE name IS NOT NULL`)
+    .all()
+    .filter((compte) => resoudreEmploye(compte.name).employe?.id === employeeId);
+}
+
+
+function accorderRoleRH(employeeId, openId) {
+  return db.prepare(`
+    UPDATE employees SET role = 'RH', lark_open_id = ? WHERE id = ?
+  `).run(openId, employeeId);
+}
+
+
+function retirerRoleRH(employeeId) {
+  return db.prepare(`
+    UPDATE employees SET role = NULL WHERE id = ?
+  `).run(employeeId);
+}
+
+
+function listerRH() {
+  const parConfig = comptesAutorisesParConfig();
+
+  const enBase = db.prepare(`
+    SELECT nom_complet, lark_open_id FROM employees
+    WHERE role = 'RH' ORDER BY nom_complet
+  `).all();
+
+  return { parConfig, enBase };
 }
 
 
@@ -540,6 +587,10 @@ module.exports = {
   listerEmployes,
   estRH,
   lierCompteLark,
+  comptesLarkPour,
+  accorderRoleRH,
+  retirerRoleRH,
+  listerRH,
   absencePour,
   enregistrerAbsence,
   estDeSoir,
