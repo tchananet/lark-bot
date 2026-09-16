@@ -25,6 +25,7 @@ const INTENTIONS = [
   "PLANNING",
   "RAPPORT",
   "PERMISSION",
+  "CORRECTION",
   "DEMANDE_RAPPORT",
   "AUTRE",
 ];
@@ -52,9 +53,37 @@ const SCHEMA = {
         required: ["personne", "type", "date_debut", "date_fin", "motif"],
       },
     },
+    corrections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          personne: { type: "string" },
+          date: { type: "string" },
+          champ: {
+            type: "string",
+            enum: [
+              "heure_arrivee",
+              "heure_depart",
+              "heure_depart_pause",
+              "heure_retour_pause",
+            ],
+          },
+          valeur: { type: "string" },
+        },
+        required: ["personne", "date", "champ", "valeur"],
+      },
+    },
     rapport_date: { type: "string" },
   },
-  required: ["intention", "certitude", "explication", "absences", "rapport_date"],
+  required: [
+    "intention",
+    "certitude",
+    "explication",
+    "absences",
+    "corrections",
+    "rapport_date",
+  ],
 };
 
 
@@ -74,9 +103,19 @@ RAPPORT : un compte rendu d'activite redige par un service.
 PERMISSION : le message declare qu'une ou plusieurs personnes etaient ou
   seront absentes, en permission, en conge, en mission, malades ou en
   formation. Cela couvre aussi une reponse aux questions posees par le bot.
+CORRECTION : le message rectifie une heure lue sur la fiche de presence.
+  Typiquement une reponse a une cellule que le bot a signalee comme
+  illisible : "Isabelle est partie a 16h09", "non, Marie est arrivee a
+  08h22", "Gloria a fini a 17h46".
 DEMANDE_RAPPORT : le message reclame un rapport, une synthese ou un
   recapitulatif, pour une date donnee ou pour la derniere journee.
 AUTRE : tout le reste, y compris les salutations et les messages sans objet.
+
+NE CONFONDS PAS PERMISSION ET CORRECTION
+PERMISSION explique POURQUOI quelqu'un n'etait pas la ou est arrive tard.
+CORRECTION dit que l'heure inscrite en base est FAUSSE et donne la bonne.
+"Bineli avait une permission" est une PERMISSION.
+"Bineli est arrive a 09h15, pas 15h40" est une CORRECTION.
 
 CHAMPS A RENSEIGNER
 absences : une entree par personne ET par periode citee. Le nom est recopie
@@ -86,6 +125,17 @@ absences : une entree par personne ET par periode citee. Le nom est recopie
   date_fin sont identiques. Le motif reprend les mots de l'expediteur ; s'il
   n'y en a pas, laisse une chaine vide.
   Laisse la liste vide pour toute intention autre que PERMISSION.
+corrections : une entree par heure rectifiee, uniquement pour CORRECTION.
+  personne : le nom tel qu'il est ecrit, sans le completer.
+  champ : heure_arrivee pour une arrivee, heure_depart pour un depart,
+    heure_depart_pause pour un depart en pause, heure_retour_pause pour un
+    retour de pause. "est partie", "a fini", "est sortie" designent un
+    depart ; "est arrivee", "a commence" designent une arrivee.
+  valeur : l'heure corrigee, recopiee telle quelle (16h09, 8h22, 17:46).
+  date : AAAA-MM-JJ si le message la precise. Si aucune date n'est donnee,
+    laisse une chaine vide : la journee sera deduite des cellules en
+    attente. N'invente jamais une date pour combler le champ.
+  Laisse la liste vide pour toute intention autre que CORRECTION.
 rapport_date : la journee demandee, au format AAAA-MM-JJ, uniquement pour
   DEMANDE_RAPPORT. Chaine vide si aucune date n'est precisee ou si
   l'intention est autre.
@@ -141,6 +191,9 @@ async function analyser({ texte = "", fichiers = [] } = {}) {
     explication: analyse.explication || "",
     // Une absence sans personne ni date est inexploitable : on la jette
     // plutot que d'ecrire une ligne incomplete en base.
+    corrections: (analyse.corrections || []).filter(
+      (c) => c.personne && c.champ && c.valeur
+    ),
     absences: (analyse.absences || []).filter(
       (a) => a.personne && /^\d{4}-\d{2}-\d{2}$/.test(a.date_debut || "")
     ),

@@ -419,6 +419,103 @@ function pointagesDuJour(date) {
   `).all(date);
 }
 
+const CHAMPS_CORRIGEABLES = new Set([
+  "heure_arrivee",
+  "heure_depart",
+  "heure_depart_pause",
+  "heure_retour_pause",
+]);
+
+
+function revuesEnAttente({ date = null, employeeId = null } = {}) {
+  return db.prepare(`
+    SELECT r.*, e.nom_complet
+    FROM attendance_review r
+    LEFT JOIN employees e ON e.id = (
+      SELECT a.employee_id FROM attendance a
+      WHERE a.date = r.date AND a.employee_id = COALESCE(?, a.employee_id)
+      LIMIT 1
+    )
+    WHERE r.resolu = 0
+      AND (? IS NULL OR r.date = ?)
+    ORDER BY r.date, r.id
+  `).all(employeeId, date, date);
+}
+
+
+// Applique une correction de la DRH sur une cellule, puis lève l'incertitude
+// qui pesait dessus. La ligne est créée si la journée entière avait ete mise
+// de cote, pour qu'une correction ne se perde jamais faute de support.
+function corrigerPointage({ employee_id, date, champ, valeur, declare_par }) {
+  if (!CHAMPS_CORRIGEABLES.has(champ)) {
+    throw new Error(`Champ non corrigeable : ${champ}`);
+  }
+
+  const heure = normaliserHeure(valeur);
+
+  if (valeur && !heure) {
+    throw new Error(`Heure illisible : ${valeur}`);
+  }
+
+  db.prepare(`
+    INSERT INTO attendance (employee_id, date, certitude)
+    VALUES (?, ?, 'CONFIRMEE')
+    ON CONFLICT(employee_id, date) DO NOTHING
+  `).run(employee_id, date);
+
+  db.prepare(`UPDATE attendance SET ${champ} = ? WHERE employee_id = ? AND date = ?`)
+    .run(heure, employee_id, date);
+
+  const ligne = db.prepare(`
+    SELECT champs_incertains FROM attendance WHERE employee_id = ? AND date = ?
+  `).get(employee_id, date);
+
+  const restants = (ligne?.champs_incertains || "")
+    .split(",")
+    .filter(Boolean)
+    .filter((c) => c !== champ);
+
+  db.prepare(`
+    UPDATE attendance
+    SET champs_incertains = ?, certitude = ?
+    WHERE employee_id = ? AND date = ?
+  `).run(
+    restants.join(",") || null,
+    restants.length ? "A_VERIFIER" : "CONFIRMEE",
+    employee_id,
+    date
+  );
+
+  // Ne clore que les revues portant sur CETTE personne ET CE champ. Filtrer
+  // sur le seul motif fermait toutes les lignes en litige sur le meme champ
+  // ce jour-la : corriger le depart d'une personne ne dit rien de celui des
+  // autres. Le rapprochement se fait en JS, car nom_brut porte l'orthographe
+  // de la fiche et non celle du registre.
+  const candidates = db.prepare(`
+    SELECT id, nom_brut, motif FROM attendance_review
+    WHERE resolu = 0 AND date = ?
+  `).all(date);
+
+  // Le rapprochement passe par resoudreEmploye et donc par la table des
+  // alias : la revue porte l'orthographe de la fiche (ETOUNA MARIE) quand
+  // le registre porte le nom complet (MARIE SHARONE ETOUNA). Comparer les
+  // cles normalisees directement echouerait sur toutes ces personnes.
+  const aClore = candidates.filter(
+    (revue) =>
+      revue.motif.includes(champ) &&
+      resoudreEmploye(revue.nom_brut).employe?.id === employee_id
+  );
+
+  const fermer = db.prepare(`UPDATE attendance_review SET resolu = 1 WHERE id = ?`);
+
+  for (const revue of aClore) {
+    fermer.run(revue.id);
+  }
+
+  return { heure, revues_closes: aClore.length, champs_restants: restants };
+}
+
+
 function signalerPourRevue(donnees) {
   return db.prepare(`
     INSERT INTO attendance_review
@@ -450,4 +547,6 @@ module.exports = {
   enregistrerPointage,
   pointagesDuJour,
   signalerPourRevue,
+  revuesEnAttente,
+  corrigerPointage,
 };

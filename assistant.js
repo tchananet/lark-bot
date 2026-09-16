@@ -3,7 +3,12 @@ const { extrairePointage, extrairePlanning } = require("./extraction");
 const { runDigest } = require("./digest");
 const { evaluerJournee } = require("./presence");
 const { localReportDate } = require("./database");
-const { resoudreEmploye, enregistrerAbsence } = require("./hr");
+const {
+  resoudreEmploye,
+  enregistrerAbsence,
+  revuesEnAttente,
+  corrigerPointage,
+} = require("./hr");
 
 // ---------------------------------------------------------------------------
 // Conversation avec la DRH
@@ -12,6 +17,13 @@ const { resoudreEmploye, enregistrerAbsence } = require("./hr");
 // verification du role est faite par l'appelant AVANT d'arriver ici, pour
 // qu'un message d'un tiers ne declenche jamais le moindre appel au modele.
 // ---------------------------------------------------------------------------
+
+const LIBELLES_CHAMPS = {
+  heure_arrivee: "heure arrivee",
+  heure_depart: "heure depart",
+  heure_depart_pause: "depart en pause",
+  heure_retour_pause: "retour de pause",
+};
 
 const TYPES_ABSENCE = {
   PERMISSION: "permission",
@@ -139,6 +151,101 @@ async function traiterAbsences(absences, expediteur, repondre) {
 }
 
 
+// "Isabelle est partie a 16h09" ne porte aucune date : on la retrouve dans
+// les cellules encore en attente pour cette personne. Si plusieurs journees
+// sont concernees, on demande laquelle plutot que de choisir au hasard.
+function dateDeLaCorrection(correction, employe) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(correction.date || "")) {
+    return { date: correction.date };
+  }
+
+  // Meme raison qu'en base : la revue porte le nom de la fiche, le registre
+  // le nom complet. Seul resoudreEmploye, qui consulte les alias, les
+  // rapproche.
+  const attentes = revuesEnAttente().filter(
+    (revue) =>
+      revue.motif.includes(correction.champ) &&
+      resoudreEmploye(revue.nom_brut).employe?.id === employe.id
+  );
+
+  const journees = [...new Set(attentes.map((r) => r.date))];
+
+  if (journees.length === 1) {
+    return { date: journees[0] };
+  }
+
+  if (journees.length > 1) {
+    return {
+      date: null,
+      question: `${employe.nom_complet} : plusieurs journees sont en attente ` +
+        `(${journees.join(", ")}). Laquelle corriger ?`,
+    };
+  }
+
+  return {
+    date: null,
+    question: `${employe.nom_complet} : aucune cellule en attente sur ce point. ` +
+      `Precisez la date a corriger.`,
+  };
+}
+
+
+async function traiterCorrections(corrections, expediteur, repondre) {
+  const faites = [];
+  const impossibles = [];
+
+  for (const correction of corrections) {
+    const { employe } = resoudreEmploye(correction.personne);
+
+    if (!employe) {
+      impossibles.push(`${correction.personne} : nom inconnu du registre.`);
+      continue;
+    }
+
+    const { date, question } = dateDeLaCorrection(correction, employe);
+
+    if (!date) {
+      impossibles.push(question);
+      continue;
+    }
+
+    try {
+      const resultat = corrigerPointage({
+        employee_id: employe.id,
+        date,
+        champ: correction.champ,
+        valeur: correction.valeur,
+        declare_par: expediteur.nom || expediteur.open_id || "RH",
+      });
+
+      faites.push(
+        `- ${employe.nom_complet}, ${date} : ` +
+        `${LIBELLES_CHAMPS[correction.champ]} = ${resultat.heure}`
+      );
+    } catch (erreur) {
+      impossibles.push(`${employe.nom_complet} : ${erreur.message}`);
+    }
+  }
+
+  const restantes = revuesEnAttente().length;
+
+  let message = "";
+
+  if (faites.length) {
+    message += `Corrige :\n${faites.join("\n")}`;
+    message += restantes
+      ? `\n\nIl reste ${restantes} cellule(s) a confirmer.`
+      : `\n\nPlus aucune cellule en attente.`;
+  }
+
+  if (impossibles.length) {
+    message += `${message ? "\n\n" : ""}${impossibles.join("\n")}`;
+  }
+
+  await repondre(message || "Aucune correction exploitable dans ce message.");
+}
+
+
 async function traiterDemandeRapport(date, repondre) {
   const cible = date || localReportDate();
 
@@ -178,6 +285,10 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
 
     case "PERMISSION":
       await traiterAbsences(analyse.absences, expediteur, repondre);
+      return analyse;
+
+    case "CORRECTION":
+      await traiterCorrections(analyse.corrections, expediteur, repondre);
       return analyse;
 
     case "DEMANDE_RAPPORT":
