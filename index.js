@@ -5,14 +5,15 @@ const { extractWord } = require("./extractors");
 
 const cron = require("node-cron");
 const Lark = require("@larksuiteoapi/node-sdk");
+const { traiter } = require("./assistant");
 const { runDigest } = require("./digest");
 const {
   saveMessage,
   saveAttachment,  saveUser,   claimMessage,
   releaseMessage,
-  localReportDate,
 
 } = require("./database");
+const { estRH } = require("./hr");
 
 
 const config = {
@@ -249,91 +250,9 @@ async function sendToReportGroup(text) {
 }
 
 
-// Commande manuelle : "/rapport" ou "/rapport 2026-09-01".
-// Tolere une mention du bot, que Lark insere sous forme @_user_N.
-function parseRapportCommand(message) {
-  if (message.message_type !== "text") {
-    return null;
-  }
-
-  let text;
-
-  try {
-    text = JSON.parse(message.content).text || "";
-  } catch (error) {
-    return null;
-  }
-
-  const cleaned = text.replace(/@_user_\d+/g, " ").trim();
-
-  if (!/^\/rapport\b/i.test(cleaned)) {
-    return null;
-  }
-
-  const argument = cleaned.replace(/^\/rapport\b/i, "").trim();
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(argument) ? argument : null;
-
-  return { date, invalidDate: argument !== "" && date === null };
-}
-
-
 async function handleMessage(data) {
     const message = data.message;
     const sender = data.sender;
-
-    // Les commandes sont traitees AVANT le filtre du groupe de suivi,
-    // pour pouvoir taper /rapport directement dans ce groupe.
-    const rapportCommand = parseRapportCommand(message);
-
-    if (rapportCommand) {
-      if (!claimMessage(message.message_id)) {
-        console.log(`Commande deja traitee, ignoree : ${message.message_id}`);
-        return;
-      }
-
-      if (rapportCommand.invalidDate) {
-        await sendTextToChat(
-          message.chat_id,
-          "Format de date invalide.\nUtilisation : /rapport ou /rapport AAAA-MM-JJ"
-        );
-        return;
-      }
-
-      const cible = rapportCommand.date || localReportDate();
-
-      console.log(`[commande] /rapport demande pour le ${cible}`);
-
-      await sendTextToChat(
-        message.chat_id,
-        `Génération du rapport du ${cible} en cours...`
-      );
-
-      const result = await runDigest({ date: rapportCommand.date });
-
-      const dansLeGroupeDeSuivi =
-        message.chat_id === process.env.LARK_REPORT_CHAT_ID;
-
-      if (result.status === "empty") {
-        await sendTextToChat(
-          message.chat_id,
-          `Aucun message enregistré pour le ${cible}.`
-        );
-      } else if (result.status === "error" && !dansLeGroupeDeSuivi) {
-        // runDigest a deja publie le detail de l'echec dans le groupe
-        // de suivi : on ne le repete que si la commande vient d'ailleurs.
-        await sendTextToChat(
-          message.chat_id,
-          `Échec de génération du rapport du ${cible}. Voir les logs du conteneur.`
-        );
-      } else if (result.status === "sent" && !dansLeGroupeDeSuivi) {
-        await sendTextToChat(
-          message.chat_id,
-          "Rapport publié dans le groupe de suivi."
-        );
-      }
-
-      return;
-    }
 
     // Ne jamais traiter les messages du groupe de supervision
     if (message.chat_id === process.env.LARK_REPORT_CHAT_ID) {
@@ -388,6 +307,10 @@ async function handleMessage(data) {
     let content = message.content;
     const parsedContent = JSON.parse(message.content);
 
+    // Fichiers telecharges pendant le traitement, remis ensuite a
+    // l'assistant si l'expediteur est la DRH.
+    const fichiersRecus = [];
+
     if (message.message_type === "text") {
         const text = parsedContent.text;
 
@@ -431,6 +354,8 @@ async function handleMessage(data) {
             file_path: filePath,
         });
 
+
+        fichiersRecus.push(filePath);
 
         await sendReportHeader(
             senderName,
@@ -508,6 +433,8 @@ async function handleMessage(data) {
             file_path: imagePath,
         });
 
+        fichiersRecus.push(imagePath);
+
         await sendReportHeader(
             senderName,
             "Image"
@@ -567,6 +494,31 @@ async function handleMessage(data) {
 
         }
 
+
+    // Seule la DRH dialogue avec le bot. Le controle passe AVANT le moindre
+    // appel au modele : les comptes rendus de tout le personnel sont deja
+    // enregistres et relayes ci-dessus, et n'ont rien a faire analyser.
+    const expediteur = {
+      open_id: sender.sender_id.open_id,
+      nom: larkUser?.name || null,
+    };
+
+    if (estRH(expediteur)) {
+      const texte =
+        message.message_type === "text" ? parsedContent.text || "" : "";
+
+      await traiter({
+        texte,
+        fichiers: fichiersRecus,
+        expediteur,
+        repondre: (reponse) => sendTextToChat(message.chat_id, reponse),
+      });
+    } else {
+      console.log(
+        `Expediteur non RH (${expediteur.nom || expediteur.open_id}) : ` +
+        `message enregistre, aucune reponse.`
+      );
+    }
 
     console.log("\n========================");
     console.log("NOUVEAU MESSAGE");

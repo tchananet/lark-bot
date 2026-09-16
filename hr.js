@@ -121,11 +121,19 @@ db.exec(`
   )
 `);
 
-// Ajout retro-compatible sur les bases deja creees.
-try {
-  db.exec(`ALTER TABLE attendance ADD COLUMN champs_incertains TEXT`);
-} catch (erreur) {
-  // La colonne existe deja.
+// Ajouts retro-compatibles sur les bases deja creees.
+const COLONNES_AJOUTEES = [
+  ["attendance", "champs_incertains TEXT"],
+  ["employees", "role TEXT"],
+  ["employees", "lark_open_id TEXT"],
+];
+
+for (const [table, colonne] of COLONNES_AJOUTEES) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${colonne}`);
+  } catch (erreur) {
+    // La colonne existe deja.
+  }
 }
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)`);
@@ -220,13 +228,14 @@ function ajouterEmploye(donnees) {
   const info = db.prepare(`
     INSERT INTO employees
       (nom_complet, nom_fiche, cle_nom, service, poste, type_contrat,
-       mode_travail, suivi_presence, ordre_fiche)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       mode_travail, suivi_presence, ordre_fiche, role)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(cle_nom) DO UPDATE SET
       nom_fiche = COALESCE(excluded.nom_fiche, nom_fiche),
       service = COALESCE(excluded.service, service),
       mode_travail = excluded.mode_travail,
-      suivi_presence = excluded.suivi_presence
+      suivi_presence = excluded.suivi_presence,
+      role = COALESCE(excluded.role, role)
   `).run(
     nomComplet,
     donnees.nom_fiche || null,
@@ -236,7 +245,8 @@ function ajouterEmploye(donnees) {
     donnees.type_contrat || "INTERNE",
     donnees.mode_travail || "PRESENTIEL",
     donnees.suivi_presence === false ? 0 : 1,
-    donnees.ordre_fiche || null
+    donnees.ordre_fiche || null,
+    donnees.role || null
   );
 
   const employe = db.prepare(`SELECT * FROM employees WHERE cle_nom = ?`)
@@ -267,6 +277,54 @@ function ajouterAlias(employeeId, alias, source) {
     VALUES (?, ?, ?, ?)
     ON CONFLICT(cle_alias) DO NOTHING
   `).run(employeeId, alias, cle, source || null);
+}
+
+
+// Seule la DRH dialogue avec le bot. Tout le monde peut deposer des
+// documents, mais personne d'autre ne recoit de reponse, et personne
+// d'autre ne peut declarer une permission au nom d'un tiers.
+function estRH(expediteur = {}) {
+  const autorises = (process.env.LARK_RH_OPEN_ID || "")
+    .split(",")
+    .map((valeur) => valeur.trim())
+    .filter(Boolean);
+
+  // Une liste explicite d'identifiants Lark fait autorite : c'est le seul
+  // critere qu'un libelle de profil ne peut pas usurper.
+  if (autorises.length) {
+    return autorises.includes(expediteur.open_id);
+  }
+
+  if (expediteur.open_id) {
+    const parCompte = db.prepare(`
+      SELECT 1 FROM employees WHERE lark_open_id = ? AND role = 'RH'
+    `).get(expediteur.open_id);
+
+    if (parCompte) {
+      return true;
+    }
+  }
+
+  if (!expediteur.nom) {
+    return false;
+  }
+
+  const { employe } = resoudreEmploye(expediteur.nom);
+
+  return !!employe && employe.role === "RH";
+}
+
+
+// Memorise le compte Lark d'un employe des qu'il est reconnu, pour que
+// l'identification cesse de dependre du libelle du profil.
+function lierCompteLark(employeeId, openId) {
+  if (!openId) {
+    return null;
+  }
+
+  return db.prepare(`
+    UPDATE employees SET lark_open_id = ? WHERE id = ?
+  `).run(openId, employeeId);
 }
 
 
@@ -383,6 +441,8 @@ module.exports = {
   ajouterEmploye,
   ajouterAlias,
   listerEmployes,
+  estRH,
+  lierCompteLark,
   absencePour,
   enregistrerAbsence,
   estDeSoir,

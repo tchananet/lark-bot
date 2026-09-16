@@ -10,7 +10,7 @@ const { ajouterEmploye, listerEmployes } = require("./hr");
 // rapprochements avec des noms de clients cites dans les rapports.
 const REGISTRE = [
   { nom_complet: "ADANA ASTHORI", alias: ["ASTRIDE", "ADANA ASTRIDE"] },
-  { nom_complet: "ALIMATOU SADIA", alias: ["SADIA"] },
+  { nom_complet: "ALIMATOU SADIA", alias: ["SADIA"], role: "RH" },
   { nom_complet: "BEN AZIR", alias: ["BEN"] },
   { nom_complet: "BINELI CYRILLE" },
   {
