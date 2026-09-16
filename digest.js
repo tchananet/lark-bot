@@ -6,6 +6,7 @@ const Lark = require("@larksuiteoapi/node-sdk");
 const { GoogleGenAI } = require("@google/genai");
 
 const { prepareDailyBatch } = require("./batch");
+const { faitsDePonctualite } = require("./presence");
 const {
   localToday,
   localReportDate,
@@ -138,6 +139,25 @@ rendez-vous fixés, injoignables, nous revient, pas intéressés, etc.).
 Calcule les totaux et taux de conversion quand les éléments le permettent,
 et précise la base du calcul. Le taux de conversion de référence est
 appels vers rendez-vous, soit rendez-vous fixés divisés par appels émis.
+
+02 Ponctualité
+Section COURTE : une à trois phrases, en texte suivi, jamais un tableau et
+jamais une liste de tout le personnel.
+Les données de ponctualité te sont fournies plus bas, DÉJÀ CALCULÉES. Ne les
+recalcule pas, n'en déduis aucune autre, et n'ajoute aucun nom qui n'y figure
+pas.
+- Si la fiche de présence n'a pas été reçue, écris exactement :
+  Fiche de présence non reçue pour cette journée.
+- Si aucun retard ni absence injustifiée ne figure dans les données, écris :
+  Aucun retard ni absence à signaler.
+- Sinon, cite les personnes concernées avec leur heure d'arrivée et, lorsqu'il
+  est connu, le motif. Dis explicitement qu'un retard est couvert lorsqu'une
+  permission ou une mission le justifie. Signale les absences non justifiées.
+Ne cite jamais les personnes en règle, ni celles en télétravail, ni les
+oublis de signature.
+Reprends les noms EXACTEMENT comme ils te sont fournis. N’ajoute jamais
+M., Mme ni aucune civilité : le genre des personnes ne t’est pas communiqué
+et une erreur dans un document signé de la DRH serait fâcheuse.
 
 Puis une section numérotée par service ayant transmis un compte rendu, dans
 cet ordre lorsqu'ils sont présents : Direction Commerciale & Call Center,
@@ -332,6 +352,10 @@ async function buildDigest(date) {
 
   const { parts, skipped, used } = await buildAttachmentParts(batch);
 
+  // Les chiffres de ponctualite sont calcules en SQL, jamais par le
+  // modele : il ne fait que les mettre en phrases.
+  const ponctualite = faitsDePonctualite(batch.date);
+
   const numero = allocateReportNumber(batch.date);
   const villeSiege = process.env.RAPPORT_VILLE || "Yaoundé";
 
@@ -349,6 +373,8 @@ async function buildDigest(date) {
       `et le lendemain matin.\n` +
       `Date couverte en majuscules : ${dateEnFrancais(batch.date).toUpperCase()}\n` +
       `Nombre de pieces jointes fournies ci-dessous : ${used}\n` +
+      `\nPONCTUALITE (donnees calculees, a reprendre telles quelles) :\n` +
+      `${JSON.stringify(ponctualite, null, 2)}\n` +
       (skipped.length
         ? `Pieces jointes non transmises : ${skipped.join(", ")}\n`
         : "") +

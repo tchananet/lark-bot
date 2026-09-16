@@ -102,6 +102,41 @@ verifier("un retard simple ne pose pas de question", () => {
   assert.strictEqual(r.question, null, "seules les anomalies interpellent la DRH");
 });
 
+// --- Retard couvert par une justification -----------------------------------
+
+verifier("une permission couvre aussi une arrivee tardive", () => {
+  const r = ligne({
+    heure_arrivee: "15h40",
+    heure_depart: "18h16",
+    absence: { type: "PERMISSION", motif: "rendez-vous medical le matin" },
+  });
+
+  assert.strictEqual(r.statut, STATUTS.ANOMALIE, "le fait reste consigne");
+  assert.strictEqual(r.justifie, true);
+  assert.strictEqual(r.motif, "rendez-vous medical le matin");
+  assert.strictEqual(r.question, null, "la DRH a deja repondu, on ne redemande pas");
+  assert.ok(/rendez-vous medical/.test(r.detail));
+});
+
+verifier("sans justification, la meme arrivee interpelle la DRH", () => {
+  const r = ligne({ heure_arrivee: "15h40", heure_depart: "18h16" });
+
+  assert.strictEqual(r.justifie, false);
+  assert.ok(r.question);
+});
+
+verifier("un retard simple justifie porte son motif", () => {
+  const r = ligne({
+    heure_arrivee: "09h00",
+    heure_depart: "18h00",
+    absence: { type: "PERMISSION", motif: "banque" },
+  });
+
+  assert.strictEqual(r.statut, STATUTS.RETARD);
+  assert.strictEqual(r.justifie, true);
+  assert.ok(/banque/.test(r.detail));
+});
+
 // --- Lignes vides : les quatre raisons possibles -----------------------------
 
 verifier("une mission prime sur le mode de travail", () => {

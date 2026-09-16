@@ -60,6 +60,8 @@ function evaluerLigne(contexte) {
     de_soir_ce_jour: !!de_soir_ce_jour,
     de_soir_la_veille: !!de_soir_la_veille,
     retard_minutes: 0,
+    justifie: false,
+    motif: null,
     question: null,
     note: null,
   };
@@ -106,13 +108,24 @@ function evaluerLigne(contexte) {
 
   const retard = arrivee - arriveePrevue;
 
+  // Une justification connue couvre aussi une arrivee tardive : quelqu'un
+  // qui avait une permission le matin et arrive a 15h40 n'est pas en faute,
+  // et la DRH n'a pas a se voir reposer la question.
+  const justifie = !!absence;
+  const motif = absence ? (absence.motif || absence.type.toLowerCase()) : null;
+
   if (retard > SEUIL_ANOMALIE) {
     return {
       ...base,
       statut: STATUTS.ANOMALIE,
       retard_minutes: retard,
-      detail: `arrivee ${heure_arrivee} au lieu de ${enTexte(arriveePrevue)}`,
-      question: `${nom} : arrivee a ${heure_arrivee} au lieu de ${enTexte(arriveePrevue)}. Permission ou mission ?`,
+      justifie,
+      motif,
+      detail: `arrivee ${heure_arrivee} au lieu de ${enTexte(arriveePrevue)}`
+        + (justifie ? ` (${motif})` : ""),
+      question: justifie
+        ? null
+        : `${nom} : arrivee a ${heure_arrivee} au lieu de ${enTexte(arriveePrevue)}. Permission ou mission ?`,
     };
   }
 
@@ -121,7 +134,10 @@ function evaluerLigne(contexte) {
       ...base,
       statut: STATUTS.RETARD,
       retard_minutes: retard,
-      detail: `${retard} min de retard (attendu ${enTexte(arriveePrevue)})`,
+      justifie,
+      motif,
+      detail: `${retard} min de retard (attendu ${enTexte(arriveePrevue)})`
+        + (justifie ? ` (${motif})` : ""),
     };
   }
 
@@ -173,8 +189,61 @@ function evaluerJournee(date) {
   };
 }
 
+// Matiere de la section ponctualite du rapport consolide : uniquement les
+// exceptions et leur explication. Le detail complet reste en base, pour les
+// recapitulatifs mensuels.
+function faitsDePonctualite(date) {
+  const { lignes, compte } = evaluerJournee(date);
+
+  const aPointe = lignes.some(
+    (l) => l.heure_arrivee !== null || l.heure_depart !== null
+  );
+
+  const exception = (l) => ({
+    nom: l.nom,
+    heure: l.heure_arrivee,
+    attendu: l.arrivee_prevue,
+    minutes: l.retard_minutes,
+    justifie: l.justifie,
+    motif: l.motif,
+    lendemain_de_permanence: l.de_soir_la_veille,
+  });
+
+  return {
+    date,
+    // Sans aucun pointage, la journee n'est pas "sans incident" : la fiche
+    // n'est simplement pas arrivee. Ne jamais confondre les deux.
+    fiche_recue: aPointe,
+    effectif_suivi: lignes.length,
+    compte,
+
+    retards: lignes
+      .filter((l) => l.statut === STATUTS.RETARD || l.statut === STATUTS.ANOMALIE)
+      .map(exception),
+
+    absences_non_justifiees: lignes
+      .filter((l) => l.statut === STATUTS.ABSENT)
+      .map((l) => ({ nom: l.nom })),
+
+    absences_justifiees: lignes
+      .filter((l) => l.statut === STATUTS.AUTORISEE)
+      .map((l) => ({ nom: l.nom, motif: l.detail })),
+
+    missions: lignes
+      .filter((l) => l.statut === STATUTS.MISSION)
+      .map((l) => ({ nom: l.nom, motif: l.detail })),
+
+    a_distance: lignes
+      .filter((l) => l.statut === STATUTS.DISTANCE)
+      .map((l) => ({ nom: l.nom })),
+
+    signatures_manquantes: lignes.filter((l) => l.note).map((l) => l.note),
+  };
+}
+
 module.exports = {
   STATUTS,
   evaluerLigne,
   evaluerJournee,
+  faitsDePonctualite,
 };
