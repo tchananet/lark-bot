@@ -14,6 +14,8 @@ const {
 
 } = require("./database");
 const { estRH } = require("./hr");
+const { consigner } = require("./journal");
+const { demarrer: demarrerInterface } = require("./serveur");
 
 
 const config = {
@@ -251,6 +253,7 @@ async function sendToReportGroup(text) {
 
 
 async function handleMessage(data) {
+    const debutTraitement = Date.now();
     const message = data.message;
     const sender = data.sender;
 
@@ -503,21 +506,60 @@ async function handleMessage(data) {
       nom: larkUser?.name || null,
     };
 
-    if (estRH(expediteur)) {
+    const rh = estRH(expediteur);
+    const entree = {
+      message_id: message.message_id,
+      chat_id: message.chat_id,
+      expediteur_open_id: expediteur.open_id,
+      expediteur_nom: expediteur.nom,
+      est_rh: rh,
+      type_message: message.message_type,
+      fichiers: fichiersRecus.map((f) => path.basename(f)),
+    };
+
+    if (rh) {
       const texte =
         message.message_type === "text" ? parsedContent.text || "" : "";
 
-      await traiter({
-        texte,
-        fichiers: fichiersRecus,
-        expediteur,
-        repondre: (reponse) => sendTextToChat(message.chat_id, reponse),
-      });
+      try {
+        const analyse = await traiter({
+          texte,
+          fichiers: fichiersRecus,
+          expediteur,
+          repondre: (reponse) => sendTextToChat(message.chat_id, reponse),
+        });
+
+        consigner({
+          ...entree,
+          intention: analyse?.intention,
+          certitude: analyse?.certitude,
+          explication: analyse?.explication,
+          duree_ms: Date.now() - debutTraitement,
+        });
+      } catch (erreur) {
+        // Le message est consigne comme en echec avant d'etre relance :
+        // sinon une panne du modele ne laisserait aucune trace consultable.
+        consigner({
+          ...entree,
+          resultat: "ERREUR",
+          detail: (erreur?.message || String(erreur)).slice(0, 500),
+          duree_ms: Date.now() - debutTraitement,
+        });
+
+        throw erreur;
+      }
     } else {
       console.log(
         `Expediteur non RH (${expediteur.nom || expediteur.open_id}) : ` +
         `message enregistre, aucune reponse.`
       );
+
+      consigner({
+        ...entree,
+        intention: "IGNORE",
+        explication: "expediteur non habilite, aucune reponse envoyee",
+        duree_ms: Date.now() - debutTraitement,
+      });
     }
 
     console.log("\n========================");
@@ -557,6 +599,8 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
 wsClient.start({
   eventDispatcher,
 });
+
+demarrerInterface();
 
 
 // Les comptes rendus d'une journee arrivent entre 17h le jour meme et 16h

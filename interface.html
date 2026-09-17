@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistant RH — ALPHA MOTORS</title>
+<style>
+  :root {
+    --fond: #faf9f7; --carte: #fff; --trait: #e3ded6; --texte: #26221d;
+    --discret: #7a736a; --accent: #7c2d2d; --ok: #2f6b4f; --alerte: #a8501a;
+    --grave: #9b2c2c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fond: #1a1816; --carte: #232120; --trait: #38332f; --texte: #ece7e1;
+      --discret: #9a938a; --accent: #d98c8c; --ok: #7bc49b; --alerte: #e0a060;
+      --grave: #e58585;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fond); color: var(--texte);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 22px 24px 16px; border-bottom: 1px solid var(--trait);
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
+  }
+  h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+  .date { color: var(--discret); font-size: 13px; }
+  main { padding: 20px 24px 60px; max-width: 1180px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 20px; }
+  nav button {
+    font: inherit; font-size: 13.5px; padding: 7px 14px; cursor: pointer;
+    background: transparent; color: var(--discret);
+    border: 1px solid transparent; border-radius: 7px;
+  }
+  nav button:hover { color: var(--texte); }
+  nav button[aria-selected="true"] {
+    background: var(--carte); color: var(--texte); border-color: var(--trait);
+  }
+  section { display: none; }
+  section.actif { display: block; }
+  .carte {
+    background: var(--carte); border: 1px solid var(--trait);
+    border-radius: 10px; overflow: hidden;
+  }
+  .defile { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th {
+    text-align: left; font-weight: 600; color: var(--discret);
+    font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase;
+    padding: 11px 14px; border-bottom: 1px solid var(--trait); white-space: nowrap;
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--trait); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; font-size: 12.5px; }
+  .etat { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
+  .e-OK { color: var(--ok); }
+  .e-RETARD, .e-alerte { color: var(--alerte); }
+  .e-ANOMALIE, .e-ABSENT, .e-ERREUR { color: var(--grave); }
+  .e-discret { color: var(--discret); }
+  .tuiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .tuile { background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; padding: 13px 15px; }
+  .tuile .n { font-size: 24px; font-weight: 640; font-variant-numeric: tabular-nums; }
+  .tuile .l { font-size: 11.5px; color: var(--discret); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+  .vide { padding: 28px 16px; text-align: center; color: var(--discret); font-size: 13.5px; }
+  .barre { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  input[type=date] {
+    font: inherit; font-size: 13.5px; padding: 6px 10px; border-radius: 7px;
+    border: 1px solid var(--trait); background: var(--carte); color: var(--texte);
+  }
+  .note { color: var(--discret); font-size: 12.5px; margin: 10px 2px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Assistant RH — ALPHA MOTORS</h1>
+  <span class="date" id="maj"></span>
+</header>
+
+<main>
+  <nav>
+    <button data-vue="presence" aria-selected="true">Présence</button>
+    <button data-vue="revue" aria-selected="false">À vérifier</button>
+    <button data-vue="journal" aria-selected="false">Journal</button>
+    <button data-vue="employes" aria-selected="false">Personnel</button>
+  </nav>
+
+  <section id="presence" class="actif">
+    <div class="barre">
+      <label for="jour" class="date">Journée</label>
+      <input type="date" id="jour">
+    </div>
+    <div class="tuiles" id="compteurs"></div>
+    <div class="carte defile"><table id="t-presence"></table></div>
+    <p class="note" id="note-presence"></p>
+  </section>
+
+  <section id="revue">
+    <div class="carte defile"><table id="t-revue"></table></div>
+    <p class="note">Cellules sur lesquelles les deux moteurs de lecture ne
+      s'accordent pas. Elles ne sont pas comptées tant qu'elles ne sont pas
+      tranchées. Pour les corriger, écrivez au bot dans Lark.</p>
+  </section>
+
+  <section id="journal">
+    <div class="carte defile"><table id="t-journal"></table></div>
+    <p class="note">Messages reçus par le bot. Le contenu n'est pas recopié
+      ici : seulement qui a écrit, ce qui a été compris et ce qui a été fait.</p>
+  </section>
+
+  <section id="employes">
+    <div class="carte defile"><table id="t-employes"></table></div>
+    <p class="note" id="note-acces"></p>
+  </section>
+</main>
+
+<script>
+const cle = new URLSearchParams(location.search).get("cle") || "";
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+
+async function api(chemin) {
+  const r = await fetch(chemin + (chemin.includes("?") ? "&" : "?") + "cle=" + encodeURIComponent(cle));
+  if (!r.ok) throw new Error((await r.json()).erreur || r.status);
+  return r.json();
+}
+
+function table(cible, colonnes, lignes, messageVide) {
+  const el = $(cible);
+  if (!lignes.length) {
+    el.innerHTML = "";
+    el.insertAdjacentHTML("afterend", "");
+    el.outerHTML = '<table id="' + cible.slice(1) + '"><tr><td class="vide">' + esc(messageVide) + "</td></tr></table>";
+    return;
+  }
+  el.outerHTML =
+    '<table id="' + cible.slice(1) + '"><thead><tr>' +
+    colonnes.map((c) => "<th>" + esc(c.titre) + "</th>").join("") +
+    "</tr></thead><tbody>" +
+    lignes.map((l) => "<tr>" + colonnes.map((c) => "<td" + (c.classe ? ' class="' + c.classe(l) + '"' : "") + ">" + c.valeur(l) + "</td>").join("") + "</tr>").join("") +
+    "</tbody></table>";
+}
+
+const classeEtat = (s) => "etat e-" + String(s || "").replace(/[^A-Z]/gi, "");
+
+async function chargerPresence() {
+  const date = $("#jour").value;
+  const d = await api("/api/presence?date=" + encodeURIComponent(date));
+
+  $("#compteurs").innerHTML = Object.entries(d.compte || {})
+    .map(([k, v]) => '<div class="tuile"><div class="n">' + v + '</div><div class="l">' + esc(k) + "</div></div>")
+    .join("");
+
+  table("#t-presence", [
+    { titre: "Statut", valeur: (l) => esc(l.statut), classe: (l) => classeEtat(l.statut) },
+    { titre: "Personne", valeur: (l) => esc(l.nom) },
+    { titre: "Arrivée", valeur: (l) => esc(l.heure_arrivee || "—"), classe: () => "mono" },
+    { titre: "Départ", valeur: (l) => esc(l.heure_depart || "—"), classe: () => "mono" },
+    { titre: "Attendu", valeur: (l) => esc(l.arrivee_prevue), classe: () => "mono e-discret" },
+    { titre: "Détail", valeur: (l) => esc(l.detail || "") },
+  ], d.lignes || [], "Aucune donnée pour cette journée.");
+
+  const notes = (d.notes || []).length;
+  $("#note-presence").textContent = notes
+    ? notes + " remarque(s) de saisie : " + d.notes.join(" · ")
+    : "";
+}
+
+async function chargerRevue() {
+  const d = await api("/api/revue");
+  table("#t-revue", [
+    { titre: "Journée", valeur: (l) => esc(l.date), classe: () => "mono" },
+    { titre: "Personne", valeur: (l) => esc(l.nom_brut || "—") },
+    { titre: "Motif", valeur: (l) => esc(l.motif) },
+    { titre: "Lecture 1", valeur: (l) => esc(l.passe_1 || ""), classe: () => "mono e-discret" },
+    { titre: "Lecture 2", valeur: (l) => esc(l.passe_2 || ""), classe: () => "mono e-discret" },
+  ], d.revues || [], "Rien en attente. Toutes les cellules sont tranchées.");
+}
+
+async function chargerJournal() {
+  const d = await api("/api/journal?limite=150");
+  table("#t-journal", [
+    { titre: "Heure", valeur: (l) => esc((l.created_at || "").slice(5, 16)), classe: () => "mono" },
+    { titre: "Expéditeur", valeur: (l) => esc(l.expediteur_nom || l.expediteur_open_id || "—") },
+    { titre: "RH", valeur: (l) => (l.est_rh ? "oui" : ""), classe: () => "e-discret" },
+    { titre: "Type", valeur: (l) => esc(l.type_message || ""), classe: () => "e-discret" },
+    { titre: "Intention", valeur: (l) => esc(l.intention || "—"), classe: (l) => (l.resultat === "ERREUR" ? "etat e-ERREUR" : "") },
+    { titre: "Fichiers", valeur: (l) => esc(l.fichiers || "") },
+    { titre: "Durée", valeur: (l) => (l.duree_ms ? Math.round(l.duree_ms / 100) / 10 + "s" : ""), classe: () => "mono e-discret" },
+    { titre: "Détail", valeur: (l) => esc(l.detail || l.explication || "") },
+  ], d.journal || [], "Aucune requête enregistrée.");
+}
+
+async function chargerEmployes() {
+  const d = await api("/api/employes");
+  table("#t-employes", [
+    { titre: "Nom", valeur: (l) => esc(l.nom_complet) },
+    { titre: "Sur la fiche", valeur: (l) => esc(l.nom_fiche || ""), classe: () => "e-discret" },
+    { titre: "Mode", valeur: (l) => esc(l.mode_travail) },
+    { titre: "Suivi", valeur: (l) => (l.suivi_presence ? "oui" : "non") },
+    { titre: "Rôle", valeur: (l) => esc(l.role || ""), classe: (l) => (l.role ? "etat e-OK" : "") },
+    { titre: "Compte Lark", valeur: (l) => (l.lark_open_id ? "relié" : ""), classe: () => "e-discret" },
+  ], d.employes || [], "Registre vide. Lancez seed-hr.js.");
+
+  const n = (d.acces?.parConfig || []).length;
+  $("#note-acces").textContent = n
+    ? n + " compte(s) habilité(s) par la configuration du serveur, en plus des rôles ci-dessus."
+    : "Aucun compte habilité par la configuration : l'accès repose sur le nom de profil Lark, ce qui est usurpable.";
+}
+
+const vues = { presence: chargerPresence, revue: chargerRevue, journal: chargerJournal, employes: chargerEmployes };
+
+async function afficher(nom) {
+  document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.vue === nom)));
+  document.querySelectorAll("section").forEach((s) => s.classList.toggle("actif", s.id === nom));
+  try {
+    await vues[nom]();
+    $("#maj").textContent = "Mis à jour à " + new Date().toLocaleTimeString("fr-FR");
+  } catch (e) {
+    $("#maj").textContent = "Erreur : " + e.message;
+  }
+}
+
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => afficher(b.dataset.vue)));
+$("#jour").addEventListener("change", chargerPresence);
+
+(async () => {
+  try {
+    const d = await api("/api/presence");
+    $("#jour").value = d.date;
+  } catch (e) {
+    $("#jour").value = new Date().toISOString().slice(0, 10);
+  }
+  afficher("presence");
+})();
+</script>
+</body>
+</html>
