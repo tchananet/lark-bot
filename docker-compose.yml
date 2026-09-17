@@ -24,12 +24,14 @@ services:
       # Interface de consultation. Sans secret, elle ne demarre pas.
       INTERFACE_TOKEN: ${INTERFACE_TOKEN:-}
       INTERFACE_PORT: 47821
+      INTERFACE_BIND: 0.0.0.0
 
-    # Publie sur la boucle locale du VPS uniquement : on y accede par
-    # un tunnel SSH. Mettre 0.0.0.0 ouvrirait ces donnees RH a Internet
-    # derriere un simple jeton transmis en clair.
+    # Accessible directement depuis un navigateur, choix assume. Le jeton
+    # circule en clair en HTTP : il est lisible dans le trafic et dans les
+    # logs d un intermediaire. Remettre "127.0.0.1:47821:47821" pour
+    # restreindre l acces a un tunnel SSH.
     ports:
-      - "127.0.0.1:47821:47821"
+      - "47821:47821"
 
     volumes:
       - ./data:/app/data

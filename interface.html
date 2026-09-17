@@ -117,13 +117,16 @@
 </main>
 
 <script>
+// Le jeton est range dans un cookie des la premiere visite : les appels
+// suivants n en ont plus besoin dans l URL.
 const cle = new URLSearchParams(location.search).get("cle") || "";
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
 
 async function api(chemin) {
-  const r = await fetch(chemin + (chemin.includes("?") ? "&" : "?") + "cle=" + encodeURIComponent(cle));
-  if (!r.ok) throw new Error((await r.json()).erreur || r.status);
+  const r = await fetch(chemin, { credentials: "same-origin" });
+  if (r.status === 401) throw new Error("cle invalide ou expiree");
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).erreur || r.status);
   return r.json();
 }
 

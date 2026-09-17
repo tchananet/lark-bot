@@ -32,10 +32,56 @@ function jeton() {
   return (process.env.INTERFACE_TOKEN || "").trim();
 }
 
+// Une adresse qui se trompe de jeton est ralentie. Sur un port ouvert, sans
+// cela, un secret se teste des milliers de fois par minute.
+const ECHECS = new Map();
+const MAX_ECHECS = 8;
+const BLOCAGE_MS = 5 * 60 * 1000;
+
+function bloquee(adresse) {
+  const suivi = ECHECS.get(adresse);
+
+  if (!suivi) {
+    return false;
+  }
+
+  if (Date.now() > suivi.jusqu_a) {
+    ECHECS.delete(adresse);
+    return false;
+  }
+
+  return suivi.echecs >= MAX_ECHECS;
+}
+
+function noterEchec(adresse) {
+  const suivi = ECHECS.get(adresse) || { echecs: 0, jusqu_a: 0 };
+
+  suivi.echecs++;
+  suivi.jusqu_a = Date.now() + BLOCAGE_MS;
+
+  ECHECS.set(adresse, suivi);
+}
+
+function lireCookie(requete, nom) {
+  const brut = requete.headers.cookie || "";
+
+  for (const morceau of brut.split(";")) {
+    const [cle, ...reste] = morceau.trim().split("=");
+
+    if (cle === nom) {
+      return decodeURIComponent(reste.join("="));
+    }
+  }
+
+  return null;
+}
+
+
 function autorise(requete, url) {
   const attendu = jeton();
   const fourni =
     url.searchParams.get("cle") ||
+    lireCookie(requete, "rh_cle") ||
     (requete.headers.authorization || "").replace(/^Bearer\s+/i, "");
 
   // Comparaison a longueur constante : une comparaison ordinaire s'arrete au
@@ -94,12 +140,37 @@ function donnees(url) {
 const serveur = http.createServer((requete, reponse) => {
   const url = new URL(requete.url, `http://${requete.headers.host || "localhost"}`);
 
+  const adresse =
+    (requete.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    requete.socket.remoteAddress ||
+    "inconnue";
+
   if (requete.method !== "GET") {
     return json(reponse, 405, { erreur: "Lecture seule" });
   }
 
+  if (bloquee(adresse)) {
+    return json(reponse, 429, { erreur: "Trop de tentatives, reessayez plus tard" });
+  }
+
   if (!autorise(requete, url)) {
+    noterEchec(adresse);
     return json(reponse, 401, { erreur: "Cle requise" });
+  }
+
+  ECHECS.delete(adresse);
+
+  // Le jeton passe dans l'URL reste dans l'historique du navigateur, dans les
+  // en-tetes Referer et dans les logs des intermediaires. Des qu'il est
+  // valide, on le range dans un cookie et on nettoie la barre d'adresse.
+  if (url.searchParams.get("cle")) {
+    return reponse.writeHead(302, {
+      "Set-Cookie":
+        `rh_cle=${encodeURIComponent(jeton())}; HttpOnly; SameSite=Strict; ` +
+        `Path=/; Max-Age=${30 * 24 * 3600}`,
+      Location: url.pathname,
+      "Cache-Control": "no-store",
+    }).end();
   }
 
   if (url.pathname === "/" || url.pathname === "/index.html") {
