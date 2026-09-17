@@ -5,7 +5,7 @@ const path = require("path");
 const { derniers, statistiques } = require("./journal");
 const { evaluerJournee } = require("./presence");
 const { revuesEnAttente, listerEmployes, listerRH } = require("./hr");
-const { localReportDate } = require("./database");
+const { localReportDate, db } = require("./database");
 
 // ---------------------------------------------------------------------------
 // Interface de consultation
@@ -125,6 +125,26 @@ function donnees(url) {
     case "/api/presence":
       return evaluerJournee(date);
 
+    case "/api/messages":
+      // Les comptes rendus collectes depuis le premier jour. Ils existent
+      // bien avant les tables RH : c'est la seule vue qui montre ce que le
+      // bot a recu avant que l'assistant RH ne soit construit.
+      return {
+        messages: db.prepare(`
+          SELECT m.created_at, m.message_type, m.content, m.file_name,
+                 COALESCE(u.name, m.sender_id) AS auteur,
+                 (SELECT COUNT(*) FROM attachments a
+                  WHERE a.message_id = m.message_id) AS pieces
+          FROM messages m
+          LEFT JOIN users u ON u.open_id = m.sender_id
+          ORDER BY m.created_at DESC LIMIT 200
+        `).all(),
+        parJour: db.prepare(`
+          SELECT DATE(created_at) AS jour, COUNT(*) AS n
+          FROM messages GROUP BY jour ORDER BY jour DESC LIMIT 30
+        `).all(),
+      };
+
     case "/api/revue":
       return { revues: revuesEnAttente() };
 
@@ -160,10 +180,15 @@ const serveur = http.createServer((requete, reponse) => {
 
   ECHECS.delete(adresse);
 
+  const estPage = url.pathname === "/" || url.pathname === "/index.html";
+
   // Le jeton passe dans l'URL reste dans l'historique du navigateur, dans les
   // en-tetes Referer et dans les logs des intermediaires. Des qu'il est
   // valide, on le range dans un cookie et on nettoie la barre d'adresse.
-  if (url.searchParams.get("cle")) {
+  //
+  // Uniquement pour la PAGE : rediriger un appel d'API casserait curl et
+  // tout script qui passe la cle en parametre.
+  if (estPage && url.searchParams.get("cle")) {
     return reponse.writeHead(302, {
       "Set-Cookie":
         `rh_cle=${encodeURIComponent(jeton())}; HttpOnly; SameSite=Strict; ` +
@@ -173,7 +198,7 @@ const serveur = http.createServer((requete, reponse) => {
     }).end();
   }
 
-  if (url.pathname === "/" || url.pathname === "/index.html") {
+  if (estPage) {
     const page = fs.readFileSync(path.join(__dirname, "interface.html"), "utf8");
 
     reponse.writeHead(200, {

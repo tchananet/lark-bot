@@ -83,6 +83,7 @@
   <nav>
     <button data-vue="presence" aria-selected="true">Présence</button>
     <button data-vue="revue" aria-selected="false">À vérifier</button>
+    <button data-vue="rapports" aria-selected="false">Rapports reçus</button>
     <button data-vue="journal" aria-selected="false">Journal</button>
     <button data-vue="employes" aria-selected="false">Personnel</button>
   </nav>
@@ -102,6 +103,13 @@
     <p class="note">Cellules sur lesquelles les deux moteurs de lecture ne
       s'accordent pas. Elles ne sont pas comptées tant qu'elles ne sont pas
       tranchées. Pour les corriger, écrivez au bot dans Lark.</p>
+  </section>
+
+  <section id="rapports">
+    <div class="tuiles" id="parjour"></div>
+    <div class="carte defile"><table id="t-messages"></table></div>
+    <p class="note">Tout ce que le bot a reçu depuis sa mise en service, bien
+      avant l'assistant RH. Ces messages alimentent le rapport consolidé.</p>
   </section>
 
   <section id="journal">
@@ -182,6 +190,22 @@ async function chargerRevue() {
   ], d.revues || [], "Rien en attente. Toutes les cellules sont tranchées.");
 }
 
+async function chargerRapports() {
+  const d = await api("/api/messages");
+
+  $("#parjour").innerHTML = (d.parJour || []).slice(0, 8)
+    .map((j) => '<div class="tuile"><div class="n">' + j.n + '</div><div class="l">' + esc(j.jour.slice(5)) + "</div></div>")
+    .join("");
+
+  table("#t-messages", [
+    { titre: "Reçu le", valeur: (l) => esc((l.created_at || "").slice(0, 16)), classe: () => "mono" },
+    { titre: "Auteur", valeur: (l) => esc(l.auteur || "—") },
+    { titre: "Type", valeur: (l) => esc(l.message_type || ""), classe: () => "e-discret" },
+    { titre: "Contenu", valeur: (l) => esc((l.content || l.file_name || "").slice(0, 160)) },
+    { titre: "PJ", valeur: (l) => (l.pieces ? String(l.pieces) : ""), classe: () => "mono e-discret" },
+  ], d.messages || [], "Aucun message collecté.");
+}
+
 async function chargerJournal() {
   const d = await api("/api/journal?limite=150");
   table("#t-journal", [
@@ -213,7 +237,7 @@ async function chargerEmployes() {
     : "Aucun compte habilité par la configuration : l'accès repose sur le nom de profil Lark, ce qui est usurpable.";
 }
 
-const vues = { presence: chargerPresence, revue: chargerRevue, journal: chargerJournal, employes: chargerEmployes };
+const vues = { presence: chargerPresence, revue: chargerRevue, rapports: chargerRapports, journal: chargerJournal, employes: chargerEmployes };
 
 async function afficher(nom) {
   document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.vue === nom)));
