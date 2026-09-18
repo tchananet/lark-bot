@@ -127,6 +127,9 @@ const COLONNES_AJOUTEES = [
   ["attendance", "champs_corriges TEXT"],
   ["employees", "role TEXT"],
   ["employees", "lark_open_id TEXT"],
+  // Renseignee par le registre, jamais devinee : une civilite fausse dans un
+  // document signe de la DRH est une faute, l'absence de civilite non.
+  ["employees", "civilite TEXT"],
 ];
 
 for (const [table, colonne] of COLONNES_AJOUTEES) {
@@ -229,14 +232,15 @@ function ajouterEmploye(donnees) {
   const info = db.prepare(`
     INSERT INTO employees
       (nom_complet, nom_fiche, cle_nom, service, poste, type_contrat,
-       mode_travail, suivi_presence, ordre_fiche, role)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       mode_travail, suivi_presence, ordre_fiche, role, civilite)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(cle_nom) DO UPDATE SET
       nom_fiche = COALESCE(excluded.nom_fiche, nom_fiche),
       service = COALESCE(excluded.service, service),
       mode_travail = excluded.mode_travail,
       suivi_presence = excluded.suivi_presence,
-      role = COALESCE(excluded.role, role)
+      role = COALESCE(excluded.role, role),
+      civilite = COALESCE(excluded.civilite, civilite)
   `).run(
     nomComplet,
     donnees.nom_fiche || null,
@@ -247,7 +251,8 @@ function ajouterEmploye(donnees) {
     donnees.mode_travail || "PRESENTIEL",
     donnees.suivi_presence === false ? 0 : 1,
     donnees.ordre_fiche || null,
-    donnees.role || null
+    donnees.role || null,
+    donnees.civilite || null
   );
 
   const employe = db.prepare(`SELECT * FROM employees WHERE cle_nom = ?`)
