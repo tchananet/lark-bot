@@ -141,6 +141,24 @@ function allocateReportNumber(date) {
 }
 
 
+// Ajout retro-compatible : les bases existantes n'ont pas cette colonne.
+try {
+  db.exec(`ALTER TABLE messages ADD COLUMN pour_rapport INTEGER NOT NULL DEFAULT 1`);
+} catch (erreur) {
+  // La colonne existe deja.
+}
+
+
+// Une conversation avec la DRH est enregistree comme tout message, mais elle
+// n'a rien a faire dans le rapport consolide : "ajoute Gloria aux RH" ou
+// "Isabelle est partie a 16h09" ne sont pas des comptes rendus d'activite.
+function exclureDuRapport(messageId) {
+  return db.prepare(`
+    UPDATE messages SET pour_rapport = 0 WHERE message_id = ?
+  `).run(messageId);
+}
+
+
 function claimMessage(messageId) {
   // Déjà réellement enregistré auparavant ?
   const existingMessage = db.prepare(`
@@ -188,7 +206,8 @@ function getDailyBatch(date = null) {
     FROM messages m
     LEFT JOIN users u
       ON u.open_id = m.sender_id
-    WHERE DATETIME(m.created_at, ?) >= ?
+    WHERE m.pour_rapport = 1
+      AND DATETIME(m.created_at, ?) >= ?
       AND DATETIME(m.created_at, ?) < ?
     ORDER BY m.created_at ASC
   `).all(TZ_OFFSET, TZ_OFFSET, debut, TZ_OFFSET, fin);
@@ -297,6 +316,7 @@ module.exports = {
     getDailyBatch,
     claimMessage,
     releaseMessage,
+    exclureDuRapport,
     localToday,
     allocateReportNumber,
     localReportDate,

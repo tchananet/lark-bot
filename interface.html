@@ -214,6 +214,7 @@ async function chargerJournal() {
     { titre: "RH", valeur: (l) => (l.est_rh ? "oui" : ""), classe: () => "e-discret" },
     { titre: "Type", valeur: (l) => esc(l.type_message || ""), classe: () => "e-discret" },
     { titre: "Intention", valeur: (l) => esc(l.intention || "—"), classe: (l) => (l.resultat === "ERREUR" ? "etat e-ERREUR" : "") },
+    { titre: "Relayé", valeur: (l) => (l.relaye ? "oui" : "non"), classe: (l) => (l.relaye ? "etat e-OK" : "e-discret") },
     { titre: "Fichiers", valeur: (l) => esc(l.fichiers || "") },
     { titre: "Durée", valeur: (l) => (l.duree_ms ? Math.round(l.duree_ms / 100) / 10 + "s" : ""), classe: () => "mono e-discret" },
     { titre: "Détail", valeur: (l) => esc(l.detail || l.explication || "") },

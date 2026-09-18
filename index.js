@@ -11,6 +11,7 @@ const {
   saveMessage,
   saveAttachment,  saveUser,   claimMessage,
   releaseMessage,
+  exclureDuRapport,
 
 } = require("./database");
 const { estRH } = require("./hr");
@@ -589,16 +590,26 @@ async function handleMessage(data) {
         // Seul un vrai compte rendu part au groupe. Une permission, une
         // correction, une demande de rapport ou une simple conversation
         // s'adressent au bot et n'ont rien a y faire.
+        const estUnRapport = analyse?.intention === "RAPPORT";
+
         await viderLesRelais(
-          analyse?.intention === "RAPPORT",
+          estUnRapport,
           `DRH, intention ${analyse?.intention || "inconnue"}`
         );
+
+        // Meme raisonnement pour le rapport consolide : sans cela, toute la
+        // conversation avec le bot atterrissait dans le rapport du jour, ou
+        // le modele tentait d'en faire du compte rendu d'activite.
+        if (!estUnRapport) {
+          exclureDuRapport(message.message_id);
+        }
 
         consigner({
           ...entree,
           intention: analyse?.intention,
           certitude: analyse?.certitude,
           explication: analyse?.explication,
+          relaye: estUnRapport,
           duree_ms: Date.now() - debutTraitement,
         });
       } catch (erreur) {
@@ -622,15 +633,15 @@ async function handleMessage(data) {
       // Pour les autres, pas d'analyse d'intention : ce serait un appel au
       // modele pour chaque message du personnel. Le filtre reste la simple
       // mesure de portee du message.
-      await viderLesRelais(
-        estSignificatif(message, parsedContent),
-        "message sans portee"
-      );
+      const aDeLaPortee = estSignificatif(message, parsedContent);
+
+      await viderLesRelais(aDeLaPortee, "message sans portee");
 
       consigner({
         ...entree,
         intention: "IGNORE",
         explication: "expediteur non habilite, aucune reponse envoyee",
+        relaye: aDeLaPortee,
         duree_ms: Date.now() - debutTraitement,
       });
     }

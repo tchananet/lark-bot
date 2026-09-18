@@ -31,6 +31,7 @@ db.exec(`
     certitude TEXT,
     explication TEXT,
 
+    relaye INTEGER NOT NULL DEFAULT 0,
     resultat TEXT NOT NULL DEFAULT 'OK',
     detail TEXT,
     duree_ms INTEGER,
@@ -38,6 +39,12 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `);
+
+try {
+  db.exec(`ALTER TABLE journal ADD COLUMN relaye INTEGER NOT NULL DEFAULT 0`);
+} catch (erreur) {
+  // La colonne existe deja.
+}
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_journal_date ON journal(created_at)`);
 
@@ -48,8 +55,8 @@ function consigner(entree) {
       INSERT INTO journal
         (message_id, chat_id, expediteur_open_id, expediteur_nom, est_rh,
          type_message, fichiers, intention, certitude, explication,
-         resultat, detail, duree_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         relaye, resultat, detail, duree_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       entree.message_id || null,
       entree.chat_id || null,
@@ -61,6 +68,7 @@ function consigner(entree) {
       entree.intention || null,
       entree.certitude || null,
       entree.explication || null,
+      entree.relaye ? 1 : 0,
       entree.resultat || "OK",
       entree.detail || null,
       entree.duree_ms || null
