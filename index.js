@@ -252,6 +252,35 @@ async function sendToReportGroup(text) {
 }
 
 
+// Accuses de reception et politesses : rien a archiver, rien a relayer.
+const ACQUITTEMENTS =
+  /^(ok+|oui|non|merci|mercii+|bonjour|bonsoir|salut|coucou|bien|bien recu|recu|note|notee|d'accord|daccord|parfait|super|nickel|top|ca marche|entendu|compris)\W*$/i;
+
+// Longueur en deca de laquelle un message texte n'est pas considere comme un
+// compte rendu. Les documents, images et notes vocales sont toujours relayes.
+const RELAI_LONGUEUR_MIN = Number(process.env.RELAI_LONGUEUR_MIN || 30);
+
+function estSignificatif(message, parsedContent) {
+  if (message.message_type !== "text") {
+    return true;
+  }
+
+  const texte = (parsedContent.text || "").trim();
+
+  if (!texte || ACQUITTEMENTS.test(texte)) {
+    return false;
+  }
+
+  // Un texte court contenant des chiffres est probablement un releve
+  // ("152 appels, 8 RDV") : on ne le jette pas sur sa seule longueur.
+  if (/\d/.test(texte)) {
+    return true;
+  }
+
+  return texte.length >= RELAI_LONGUEUR_MIN;
+}
+
+
 async function handleMessage(data) {
     const debutTraitement = Date.now();
     const message = data.message;
@@ -314,6 +343,34 @@ async function handleMessage(data) {
     // l'assistant si l'expediteur est la DRH.
     const fichiersRecus = [];
 
+    const expediteur = {
+      open_id: sender.sender_id.open_id,
+      nom: larkUser?.name || null,
+    };
+
+    const rh = estRH(expediteur);
+
+    // Deux raisons de ne rien relayer au groupe de suivi :
+    //   - la DRH s'adresse au bot, pas au groupe. Relayer ses messages
+    //     publiait ses fiches de presence a tout le monde, et avant meme
+    //     de les avoir traitees.
+    //   - un "ok" ou un "merci" de qui que ce soit n'a rien a y faire.
+    const relayer = !rh && estSignificatif(message, parsedContent);
+
+    if (!relayer) {
+      console.log(
+        `Message non relaye au groupe (${rh ? "DRH" : "sans portee"}) : ` +
+        `${message.message_id}`
+      );
+    }
+
+    // Le message reste enregistre en base dans tous les cas : seul le relai
+    // vers le groupe de suivi est conditionnel.
+    const relayerTexte = (t) => (relayer ? sendToReportGroup(t) : null);
+    const relayerEntete = (...a) => (relayer ? sendReportHeader(...a) : null);
+    const relayerImage = (p) => (relayer ? sendImageToReportGroup(p) : null);
+    const relayerFichier = (...a) => (relayer ? sendFileToReportGroup(...a) : null);
+
     if (message.message_type === "text") {
         const text = parsedContent.text;
 
@@ -328,7 +385,7 @@ async function handleMessage(data) {
         });
 
 
-        await sendToReportGroup(text);
+        await relayerTexte(text);
 
         console.log("✓ Message enregistré");
     }
@@ -360,13 +417,13 @@ async function handleMessage(data) {
 
         fichiersRecus.push(filePath);
 
-        await sendReportHeader(
+        await relayerEntete(
             senderName,
             "Fichier",
             parsedContent.file_name
         );
 
-        await sendFileToReportGroup(
+        await relayerFichier(
             filePath,
             parsedContent.file_name
         );
@@ -396,12 +453,12 @@ async function handleMessage(data) {
             file_path: audioPath,
         });
 
-        await sendReportHeader(
+        await relayerEntete(
             senderName,
             "Note vocale"
         );
 
-        await sendFileToReportGroup(
+        await relayerFichier(
             audioPath,
             `${message.message_id}.opus`,
             {
@@ -438,12 +495,12 @@ async function handleMessage(data) {
 
         fichiersRecus.push(imagePath);
 
-        await sendReportHeader(
+        await relayerEntete(
             senderName,
             "Image"
         );
 
-        await sendImageToReportGroup(imagePath);
+        await relayerImage(imagePath);
 
         console.log("✓ Image enregistrée");
     }
@@ -468,7 +525,7 @@ async function handleMessage(data) {
             content: textContent,
         });
 
-        await sendReportHeader(
+        await relayerEntete(
             senderName,
             "Message riche",
             textContent
@@ -492,21 +549,15 @@ async function handleMessage(data) {
                 file_path: imagePath,
             });
             
-            await sendImageToReportGroup(imagePath);
+            await relayerImage(imagePath);
             }
 
         }
 
 
-    // Seule la DRH dialogue avec le bot. Le controle passe AVANT le moindre
-    // appel au modele : les comptes rendus de tout le personnel sont deja
-    // enregistres et relayes ci-dessus, et n'ont rien a faire analyser.
-    const expediteur = {
-      open_id: sender.sender_id.open_id,
-      nom: larkUser?.name || null,
-    };
-
-    const rh = estRH(expediteur);
+    // Seule la DRH dialogue avec le bot. Le controle a ete fait plus haut,
+    // avant le relai vers le groupe, et donc avant le moindre appel au
+    // modele : un compte rendu ordinaire ne fait rien analyser du tout.
     const entree = {
       message_id: message.message_id,
       chat_id: message.chat_id,

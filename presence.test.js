@@ -54,9 +54,29 @@ verifier("la veille traverse un changement de mois", () => {
 // --- Horaires attendus ------------------------------------------------------
 
 verifier("lendemain de permanence : arrivee attendue a 10h30", () => {
-  const r = ligne({ heure_arrivee: "10h43", heure_depart: "18h08", de_soir_la_veille: true });
+  const r = ligne({ heure_arrivee: "10h15", heure_depart: "18h08", de_soir_la_veille: true });
   assert.strictEqual(r.arrivee_prevue, "10h30");
-  assert.strictEqual(r.statut, STATUTS.OK, "13 min de retard tient dans la tolerance");
+  assert.strictEqual(r.statut, STATUTS.OK, "avant 10h30 reste conforme");
+});
+
+verifier("apres une permanence, 10h30 est une limite FERME", () => {
+  const pile = ligne({ heure_arrivee: "10h30", heure_depart: "18h00", de_soir_la_veille: true });
+  assert.strictEqual(pile.statut, STATUTS.OK, "10h30 pile reste conforme");
+
+  const apres = ligne({ heure_arrivee: "10h31", heure_depart: "18h00", de_soir_la_veille: true });
+  assert.strictEqual(apres.statut, STATUTS.RETARD, "une minute apres 10h30 est un retard");
+  assert.strictEqual(apres.retard_minutes, 1);
+});
+
+verifier("la tolerance de 15 min ne s applique PAS apres une permanence", () => {
+  const r = ligne({ heure_arrivee: "10h43", heure_depart: "18h08", de_soir_la_veille: true });
+
+  assert.strictEqual(r.statut, STATUTS.RETARD, "13 min apres 10h30 est un retard");
+  assert.strictEqual(r.retard_minutes, 13);
+});
+
+verifier("la tolerance vaut toujours pour la prise de service normale", () => {
+  assert.strictEqual(ligne({ heure_arrivee: "08h45", heure_depart: "18h00" }).statut, STATUTS.OK);
 });
 
 verifier("sans permanence la veille, la meme arrivee est une anomalie", () => {

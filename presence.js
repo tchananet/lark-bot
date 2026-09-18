@@ -120,6 +120,11 @@ function evaluerLigne(contexte) {
 
   const retard = arrivee - arriveePrevue;
 
+  // Le lendemain d'une permanence, 10h30 est une limite FERME : la tolerance
+  // de 15 minutes ne s'y ajoute pas. Elle ne vaut que pour la prise de
+  // service normale de 08h30.
+  const tolerance = de_soir_la_veille ? 0 : TOLERANCE;
+
   // Une justification connue couvre aussi une arrivee tardive : quelqu'un
   // qui avait une permission le matin et arrive a 15h40 n'est pas en faute,
   // et la DRH n'a pas a se voir reposer la question.
@@ -141,13 +146,13 @@ function evaluerLigne(contexte) {
     };
   }
 
-  if (retard > TOLERANCE) {
+  if (retard > tolerance) {
     // Deux lectures concordantes peuvent se tromper ensemble : sur la fiche
     // reelle, 08h22 a ete lu 08h09 par les deux passes. L'erreur n'a de
     // consequence que pres du seuil, la ou quelques minutes font basculer le
     // verdict. On ne reproche donc jamais un retard serre sans inviter a
     // verifier la fiche papier.
-    const marge = retard - TOLERANCE;
+    const marge = retard - tolerance;
 
     return {
       ...base,
