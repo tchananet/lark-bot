@@ -124,6 +124,7 @@ db.exec(`
 // Ajouts retro-compatibles sur les bases deja creees.
 const COLONNES_AJOUTEES = [
   ["attendance", "champs_incertains TEXT"],
+  ["attendance", "champs_corriges TEXT"],
   ["employees", "role TEXT"],
   ["employees", "lark_open_id TEXT"],
 ];
@@ -426,7 +427,42 @@ function enregistrerPosteDeSoir(employeeId, date, documentId) {
   `).run(employeeId, date, documentId || null);
 }
 
+// Une nouvelle lecture de la meme journee ENRICHIT la ligne, elle ne la
+// remplace pas. Deux pertes s'en suivaient autrement :
+//   - une fiche renvoyee moins lisible effacait une heure deja lue ;
+//   - une correction de la DRH etait defaite par le reenvoi de la fiche.
+// Une case que la nouvelle lecture ne dit pas laisse donc l'ancienne en
+// place, et une case corrigee a la main n'est jamais retouchee.
 function enregistrerPointage(donnees) {
+  const existant = db.prepare(`
+    SELECT * FROM attendance WHERE employee_id = ? AND date = ?
+  `).get(donnees.employee_id, donnees.date);
+
+  const corriges = new Set(
+    (existant?.champs_corriges || "").split(",").filter(Boolean)
+  );
+
+  const fusionner = (champ) => {
+    if (corriges.has(champ)) {
+      return existant[champ];
+    }
+
+    return normaliserHeure(donnees[champ]) ?? existant?.[champ] ?? null;
+  };
+
+  const valeurs = {
+    heure_arrivee: fusionner("heure_arrivee"),
+    heure_depart: fusionner("heure_depart"),
+    heure_depart_pause: fusionner("heure_depart_pause"),
+    heure_retour_pause: fusionner("heure_retour_pause"),
+  };
+
+  // Une case corrigee a la main n'est plus incertaine, quoi qu'en dise la
+  // nouvelle lecture.
+  const incertains = (donnees.champs_incertains || []).filter(
+    (champ) => !corriges.has(champ)
+  );
+
   return db.prepare(`
     INSERT INTO attendance
       (employee_id, date, heure_arrivee, heure_depart, heure_depart_pause,
@@ -438,21 +474,21 @@ function enregistrerPointage(donnees) {
       heure_depart = excluded.heure_depart,
       heure_depart_pause = excluded.heure_depart_pause,
       heure_retour_pause = excluded.heure_retour_pause,
-      observation = excluded.observation,
+      observation = COALESCE(excluded.observation, observation),
       source_document_id = excluded.source_document_id,
       certitude = excluded.certitude,
       champs_incertains = excluded.champs_incertains
   `).run(
     donnees.employee_id,
     donnees.date,
-    normaliserHeure(donnees.heure_arrivee),
-    normaliserHeure(donnees.heure_depart),
-    normaliserHeure(donnees.heure_depart_pause),
-    normaliserHeure(donnees.heure_retour_pause),
+    valeurs.heure_arrivee,
+    valeurs.heure_depart,
+    valeurs.heure_depart_pause,
+    valeurs.heure_retour_pause,
     donnees.observation || null,
     donnees.source_document_id || null,
-    donnees.certitude || "CONFIRMEE",
-    (donnees.champs_incertains || []).join(",") || null
+    incertains.length ? "A_VERIFIER" : "CONFIRMEE",
+    incertains.join(",") || null
   );
 }
 
@@ -514,7 +550,8 @@ function corrigerPointage({ employee_id, date, champ, valeur, declare_par }) {
     .run(heure, employee_id, date);
 
   const ligne = db.prepare(`
-    SELECT champs_incertains FROM attendance WHERE employee_id = ? AND date = ?
+    SELECT champs_incertains, champs_corriges FROM attendance
+    WHERE employee_id = ? AND date = ?
   `).get(employee_id, date);
 
   const restants = (ligne?.champs_incertains || "")
@@ -522,12 +559,21 @@ function corrigerPointage({ employee_id, date, champ, valeur, declare_par }) {
     .filter(Boolean)
     .filter((c) => c !== champ);
 
+  // La correction est memorisee : un reenvoi ulterieur de la meme fiche ne
+  // doit pas defaire ce que la DRH a tranche.
+  const corriges = new Set(
+    (ligne?.champs_corriges || "").split(",").filter(Boolean)
+  );
+
+  corriges.add(champ);
+
   db.prepare(`
     UPDATE attendance
-    SET champs_incertains = ?, certitude = ?
+    SET champs_incertains = ?, champs_corriges = ?, certitude = ?
     WHERE employee_id = ? AND date = ?
   `).run(
     restants.join(",") || null,
+    [...corriges].join(","),
     restants.length ? "A_VERIFIER" : "CONFIRMEE",
     employee_id,
     date
