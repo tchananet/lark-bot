@@ -350,26 +350,32 @@ async function handleMessage(data) {
 
     const rh = estRH(expediteur);
 
-    // Deux raisons de ne rien relayer au groupe de suivi :
-    //   - la DRH s'adresse au bot, pas au groupe. Relayer ses messages
-    //     publiait ses fiches de presence a tout le monde, et avant meme
-    //     de les avoir traitees.
-    //   - un "ok" ou un "merci" de qui que ce soit n'a rien a y faire.
-    const relayer = !rh && estSignificatif(message, parsedContent);
-
-    if (!relayer) {
-      console.log(
-        `Message non relaye au groupe (${rh ? "DRH" : "sans portee"}) : ` +
-        `${message.message_id}`
-      );
-    }
-
+    // Le relai est DIFFERE. Pour la DRH, la decision depend de l'intention
+    // du message, qui n'est connue qu'apres analyse : une conversation avec
+    // le bot ne regarde pas le groupe, un compte rendu si. On empile donc
+    // les envois et on tranche une fois le message traite.
+    //
     // Le message reste enregistre en base dans tous les cas : seul le relai
     // vers le groupe de suivi est conditionnel.
-    const relayerTexte = (t) => (relayer ? sendToReportGroup(t) : null);
-    const relayerEntete = (...a) => (relayer ? sendReportHeader(...a) : null);
-    const relayerImage = (p) => (relayer ? sendImageToReportGroup(p) : null);
-    const relayerFichier = (...a) => (relayer ? sendFileToReportGroup(...a) : null);
+    const relais = [];
+
+    const relayerTexte = (t) => relais.push(() => sendToReportGroup(t));
+    const relayerEntete = (...a) => relais.push(() => sendReportHeader(...a));
+    const relayerImage = (p) => relais.push(() => sendImageToReportGroup(p));
+    const relayerFichier = (...a) => relais.push(() => sendFileToReportGroup(...a));
+
+    async function viderLesRelais(doitRelayer, motif) {
+      if (!doitRelayer) {
+        console.log(
+          `Message non relaye au groupe (${motif}) : ${message.message_id}`
+        );
+        return;
+      }
+
+      for (const envoyer of relais) {
+        await envoyer();
+      }
+    }
 
     if (message.message_type === "text") {
         const text = parsedContent.text;
@@ -580,6 +586,14 @@ async function handleMessage(data) {
           repondre: (reponse) => sendTextToChat(message.chat_id, reponse),
         });
 
+        // Seul un vrai compte rendu part au groupe. Une permission, une
+        // correction, une demande de rapport ou une simple conversation
+        // s'adressent au bot et n'ont rien a y faire.
+        await viderLesRelais(
+          analyse?.intention === "RAPPORT",
+          `DRH, intention ${analyse?.intention || "inconnue"}`
+        );
+
         consigner({
           ...entree,
           intention: analyse?.intention,
@@ -603,6 +617,14 @@ async function handleMessage(data) {
       console.log(
         `Expediteur non RH (${expediteur.nom || expediteur.open_id}) : ` +
         `message enregistre, aucune reponse.`
+      );
+
+      // Pour les autres, pas d'analyse d'intention : ce serait un appel au
+      // modele pour chaque message du personnel. Le filtre reste la simple
+      // mesure de portee du message.
+      await viderLesRelais(
+        estSignificatif(message, parsedContent),
+        "message sans portee"
       );
 
       consigner({
