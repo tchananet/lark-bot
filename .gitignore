@@ -2,8 +2,4 @@ node_modules
 downloads
 .env
 lark-bot.db
-# Documents RH et registre nominatif : donnees personnelles,
-# volontairement hors du depot.
-employes.csv
-*.pdf
-*.docx
+Rapport_Consolide_Alpha_Motors_*.docx
