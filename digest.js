@@ -411,6 +411,7 @@ async function runDigest(options = {}) {
 
 
 module.exports = {
+  PROMPT,
   runDigest,
   buildDigest,
   buildAttachmentParts,

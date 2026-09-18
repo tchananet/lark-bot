@@ -226,4 +226,4 @@ async function analyser({ texte = "", fichiers = [] } = {}) {
   };
 }
 
-module.exports = { analyser, INTENTIONS };
+module.exports = { analyser, INTENTIONS, SCHEMA, prompt };
