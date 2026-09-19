@@ -180,9 +180,12 @@ actions : une entree par service concerne.
 conclusion : deux ou trois paragraphes. Volume d'activite, ce qui a ete
   concretise ou non, ce qui reste en suspens.
 donnees_manquantes : un element par service attendu dont le compte rendu n'est
-  pas arrive. Liste vide si tout est la. Le programme y ajoute lui-meme les
-  pieces qu'il n'a pas su lire et celles qui portaient sur une autre journee :
-  ne les devine pas, ne les anticipe pas.
+  pas arrive. Chaque element est une PHRASE COMPLETE, par exemple : Le compte
+  rendu de la Direction Commerciale & Call Center n'est pas parvenu pour cette
+  journee. Un nom de service seul ne veut rien dire pour qui lit le rapport.
+  Liste vide si tout est la. Le programme y ajoute lui-meme les pieces qu'il
+  n'a pas su lire et celles qui portaient sur une autre journee : ne les
+  devine pas, ne les anticipe pas.
 
 REGLES DE FOND
 - N'invente jamais un chiffre, un nom, un dossier ni une activite.
@@ -340,6 +343,19 @@ function valider(d, type, ponctualite = null) {
 
   for (const a of d.actions || []) {
     if (vide(a.service) || vide(a.action)) erreurs.push("action incomplete");
+  }
+
+  // "Direction Commerciale & Call Center" tout seul, sans verbe, n'apprend
+  // rien a qui lit le rapport : manquant, en retard, illisible ?
+  // Compte les mots plutot que les caracteres : "Direction Commerciale & Call
+  // Center" est long sans rien dire. Les entrees ajoutees ensuite par le
+  // programme ne passent pas ici, elles sont fusionnees apres validation.
+  for (const manque of d.donnees_manquantes || []) {
+    const mots = String(manque || "").trim().split(/\s+/).filter(Boolean);
+
+    if (mots.length < 6) {
+      erreurs.push(`donnee manquante sans explication : ${manque}`);
+    }
   }
 
   // Un rapport qui releve des points d attention sans rien demander a
@@ -644,6 +660,58 @@ async function trierParJournee(lues, date) {
 }
 
 
+// compte ventile les journees par statut interne : RETARD et ANOMALIE y sont
+// distincts alors que la liste des retards reunit les deux. Le modele
+// recopiait les deux chiffres et le rapport annoncait "1 en retard" au-dessus
+// d'une liste de cinq noms. Il n'a pas besoin de ce decompte : les listes
+// portent deja tout, et il lui est demande de ne compter lui-meme jamais.
+function ponctualiteSoumise(ponctualite) {
+  const { compte, ...reste } = ponctualite;
+
+  return reste;
+}
+
+
+const FENETRE_SUIVANTE = process.env.RAPPORT_FENETRE_SUIVANTE !== "false";
+
+async function piecesRetardataires(date) {
+  if (!FENETRE_SUIVANTE) {
+    return [];
+  }
+
+  const lendemain = veille(date, -1);
+  const batch = prepareDailyBatch(lendemain);
+
+  if (!batch.messages.some((m) => m.attachments.length)) {
+    return [];
+  }
+
+  const { lues } = await lirePiecesJointes(batch);
+  const rattrapees = [];
+
+  for (const piece of lues) {
+    let journee = null;
+
+    try {
+      journee = await journeeDuComptRendu(piece, date);
+    } catch (erreur) {
+      continue;
+    }
+
+    if (journee.date === date) {
+      console.log(
+        `[rapport]   rattrapee : ${piece.nom}, arrivee apres la fermeture ` +
+        `de la fenetre (${journee.indice})`
+      );
+
+      rattrapees.push(piece);
+    }
+  }
+
+  return rattrapees;
+}
+
+
 async function construireQuotidien(date) {
   const batch = prepareDailyBatch(date);
   const ponctualite = faitsDePonctualite(date);
@@ -655,10 +723,20 @@ async function construireQuotidien(date) {
   const pieces = await lirePiecesJointes(batch);
   const tri = await trierParJournee(pieces.lues, date);
 
+  // Un service en retard de transmission depose son compte rendu apres la
+  // fermeture de la fenetre : il n'apparait alors dans AUCUN rapport, ni dans
+  // celui de la journee qu'il couvre, deja publie, ni dans celui de la
+  // journee ou il arrive, qui l'ecarte a juste titre. On va donc le chercher
+  // dans la fenetre suivante -- mais uniquement s'il porte EXPLICITEMENT la
+  // date couverte : une piece sans date n'a rien a faire ici.
+  const retardataires = await piecesRetardataires(date);
+
+  tri.retenues.push(...retardataires);
+
   const contexte =
     `${consigneQuotidien(date)}\n\n` +
     `PONCTUALITE (calculee, a reprendre telle quelle) :\n` +
-    `${JSON.stringify(ponctualite)}\n\n` +
+    `${JSON.stringify(ponctualiteSoumise(ponctualite))}\n\n` +
     `COMPTES RENDUS RECUS :\n` +
     `${JSON.stringify(batch.messages.map((m) => ({ heure: m.timestamp, texte: m.text })))}` +
     (tri.retenues.length
