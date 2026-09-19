@@ -521,6 +521,8 @@ async function produireQuotidien(date, dossier = ".") {
 }
 
 module.exports = {
+  lirePiece,
+  lirePiecesJointes,
   construireQuotidien,
   produireQuotidien,
   valider,

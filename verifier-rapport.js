@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
+
 const { db, reportWindow, localReportDate } = require("./database");
 
 // ---------------------------------------------------------------------------
@@ -44,6 +47,40 @@ const INTENTION = db.prepare(`
   ORDER BY id DESC
   LIMIT 1
 `);
+
+const PIECES = db.prepare(`
+  SELECT attachment_type, file_name, file_path
+  FROM attachments
+  WHERE message_id = ?
+  ORDER BY id ASC
+`);
+
+// Une piece jointe ne parvient au rapport que si trois conditions tiennent :
+// le fichier existe encore sur le disque, son extension est lisible, et le
+// message n'a pas ete ecarte. Les trois sont verifiees ici, parce qu'aucune
+// ne se voit depuis Lark.
+const EXTENSIONS_LUES = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".docx"];
+
+function etatPiece(piece) {
+  const chemin = piece.file_path;
+
+  if (!chemin) {
+    return "AUCUN CHEMIN EN BASE - jamais telechargee";
+  }
+
+  if (!fs.existsSync(chemin)) {
+    return `ABSENTE DU DISQUE - ${chemin}`;
+  }
+
+  const ext = path.extname(piece.file_name || chemin).toLowerCase();
+  const taille = Math.round(fs.statSync(chemin).size / 1024);
+
+  if (!EXTENSIONS_LUES.includes(ext)) {
+    return `FORMAT NON LU (${ext || "sans extension"}) - ${taille} Ko`;
+  }
+
+  return `lisible (${ext}, ${taille} Ko)`;
+}
 
 function messagesDe(date) {
   const { debut, fin } = reportWindow(date);
@@ -110,6 +147,12 @@ function afficher(date, options = {}) {
 
     console.log(`     ${apercu(ligne)}`);
 
+    for (const piece of PIECES.all(ligne.message_id)) {
+      console.log(
+        `     piece : ${piece.file_name || "(sans nom)"} -> ${etatPiece(piece)}`
+      );
+    }
+
     if (journal) {
       console.log(
         `     lu comme : ${journal.intention || "?"} ` +
@@ -129,32 +172,94 @@ function afficher(date, options = {}) {
   }
 }
 
-const date = process.argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) || localReportDate();
+// Le format d'un fichier ne dit pas ce que le modele y lit. --lire transcrit
+// reellement chaque piece, exactement comme le fait le rapport, et montre le
+// debut du texte obtenu : c'est la seule facon de voir quelle date le modele
+// a sous les yeux. Compter environ un demi-centime par piece.
+async function transcrire(date) {
+  const { lirePiece } = require("./rapport");
+  const { lignes } = messagesDe(date);
 
-const d = new Date(`${date}T00:00:00Z`);
-const decale = (jours) => {
-  const copie = new Date(d);
-  copie.setUTCDate(copie.getUTCDate() + jours);
-  return copie.toISOString().slice(0, 10);
-};
+  console.log("\n---------------------------------------------------------------");
+  console.log("Transcription des pieces jointes, telle que le rapport la voit :");
 
-afficher(date);
+  for (const ligne of lignes) {
+    for (const piece of PIECES.all(ligne.message_id)) {
+      const nom = piece.file_name || "(sans nom)";
 
-console.log("\n---------------------------------------------------------------");
-console.log("Fenetres voisines, au cas ou un compte rendu y serait tombe :");
+      console.log(`\n  ${ligne.heure_locale}  ${ligne.expediteur}  ${nom}`);
 
-afficher(decale(-1), { bref: true });
-afficher(decale(1), { bref: true });
+      if (!piece.file_path || !fs.existsSync(piece.file_path)) {
+        console.log("     NON LUE : fichier introuvable sur le disque.");
+        continue;
+      }
 
-console.log(
-  `\nDetail d'une fenetre voisine : node verifier-rapport.js ${decale(-1)}`
-);
+      try {
+        const lecture = await lirePiece(piece.file_path, nom);
 
-if (!COMPLET) {
-  console.log(
-    `Texte integral des comptes rendus, pour voir quelle date ils annoncent : ` +
-    `node verifier-rapport.js ${date} --complet\n`
-  );
+        if (!lecture || !(lecture.texte || "").trim()) {
+          console.log("     NON LUE : format non pris en charge, ou texte vide.");
+          continue;
+        }
+
+        const debut = lecture.texte.trim().split("\n").slice(0, 15);
+
+        console.log(debut.map((l) => `     | ${l}`).join("\n"));
+
+        if (lecture.texte.trim().split("\n").length > 15) {
+          console.log("     | ...");
+        }
+      } catch (erreur) {
+        console.log(`     NON LUE : ${erreur.message}`);
+      }
+    }
+  }
 }
 
-process.exitCode = 0;
+
+async function principal() {
+  const date =
+    process.argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) || localReportDate();
+
+  const d = new Date(`${date}T00:00:00Z`);
+  const decale = (jours) => {
+    const copie = new Date(d);
+    copie.setUTCDate(copie.getUTCDate() + jours);
+    return copie.toISOString().slice(0, 10);
+  };
+
+  afficher(date);
+
+  console.log("\n---------------------------------------------------------------");
+  console.log("Fenetres voisines, au cas ou un compte rendu y serait tombe :");
+
+  afficher(decale(-1), { bref: true });
+  afficher(decale(1), { bref: true });
+
+  if (process.argv.includes("--lire")) {
+    await transcrire(date);
+  }
+
+  console.log(
+    `\nDetail d'une fenetre voisine : node verifier-rapport.js ${decale(-1)}`
+  );
+
+  if (!COMPLET) {
+    console.log(
+      `Texte integral des messages : ` +
+      `node verifier-rapport.js ${date} --complet`
+    );
+  }
+
+  if (!process.argv.includes("--lire")) {
+    console.log(
+      `Transcription des pieces jointes, comme le rapport les lit : ` +
+      `node verifier-rapport.js ${date} --lire\n`
+    );
+  }
+}
+
+principal().catch((erreur) => {
+  console.error(erreur);
+  process.exitCode = 1;
+});
