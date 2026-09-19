@@ -232,6 +232,46 @@ async function transcrire(date) {
 }
 
 
+// Quelqu'un de garde le soir peut arriver jusqu'a 10h30 le lendemain sans
+// etre en retard. Encore faut-il que le bot sache qu'il etait de garde : sans
+// le planning de la semaine, il attend tout le monde a 08h30 et signale des
+// retards qui n'en sont pas.
+function gardesDeLaVeille(date, veille) {
+  console.log("\n---------------------------------------------------------------");
+  console.log(`Gardes du soir du ${veille} (arrivee autorisee a 10h30 le ${date}) :`);
+
+  let gardes = [];
+
+  try {
+    gardes = db.prepare(`
+      SELECT COALESCE(e.nom_complet, s.employee_id) AS nom
+      FROM shift_schedule s
+      LEFT JOIN employees e ON e.id = s.employee_id
+      WHERE s.date = ? AND s.type_poste = 'SOIR'
+      ORDER BY nom
+    `).all(veille);
+  } catch (erreur) {
+    console.log(`  Table des gardes illisible : ${erreur.message}`);
+    return;
+  }
+
+  if (gardes.length) {
+    console.log(`  ${gardes.map((g) => g.nom).join(", ")}`);
+    return;
+  }
+
+  const total = db.prepare("SELECT COUNT(*) AS n FROM shift_schedule").get().n;
+
+  console.log(
+    total
+      ? `  Personne. Le planning connait ${total} garde(s) sur d'autres dates.`
+      : `  Personne, et AUCUNE garde n'est enregistree : le planning ` +
+        `hebdomadaire n'a jamais ete transmis au bot. Tout le monde est donc ` +
+        `attendu a 08h30, et les gardes du soir ressortent en retard.`
+  );
+}
+
+
 async function principal() {
   const date =
     process.argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) || localReportDate();
@@ -250,6 +290,8 @@ async function principal() {
 
   afficher(decale(-1), { bref: true });
   afficher(decale(1), { bref: true });
+
+  gardesDeLaVeille(date, decale(-1));
 
   if (process.argv.includes("--lire")) {
     await transcrire(date);
