@@ -190,7 +190,11 @@ function evaluerJournee(date) {
       const pointage = pointages.get(employe.id) || {};
 
       return evaluerLigne({
-        nom: employe.nom_complet,
+        // La civilite vient du registre. Elle est vide tant que la DRH ne
+        // l'a pas renseignee, et dans ce cas la personne est nommee sans
+        // civilite plutot qu'avec une civilite devinee.
+        nom: [employe.civilite, employe.nom_complet].filter(Boolean).join(" "),
+        service: employe.service,
         employee_id: employe.id,
         heure_arrivee: pointage.heure_arrivee,
         heure_depart: pointage.heure_depart,

@@ -122,7 +122,12 @@ function importer(chemin = CHEMIN_PAR_DEFAUT) {
       service: e.service || null,
       poste: e.poste || null,
       type_contrat: collectif ? "PRESTATAIRE" : "INTERNE",
-      mode_travail: /distance/i.test(e.mode_travail || "") ? "DISTANCE" : "PRESENTIEL",
+      // Colonne absente : on ne touche pas au mode deja enregistre. Sans
+      // cela, un import ecrasait le teletravail et les interesses
+      // ressortaient ABSENTS chaque jour.
+      mode_travail: e.mode_travail
+        ? (/distance/i.test(e.mode_travail) ? "DISTANCE" : "PRESENTIEL")
+        : undefined,
       civilite,
       ordre_fiche: index,
       alias,

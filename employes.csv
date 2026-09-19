@@ -1,21 +1,22 @@
-nom_complet;nom_famille;prenom;nom_usuel;type;service;poste
-ADANA ASTHORIE;ADANA;ASTHORIE;ASTRIDE;individuel;;
-ALIMATOU SADIA;ALIMATOU;SADIA;SADIA;individuel;;
-BEN AZIR;BEN;AZIR;BEN;individuel;;
-BINELI CYRILLE;BINELI;CYRILLE;;individuel;;
-ETOUNA MARIE SHARONE;ETOUNA;MARIE;MARIE;individuel;;
-MEDJO LOIC;MEDJO;LOIC;;individuel;;
-FEZZE WILLIAM;FEZZE;WILLIAM;WILLIAM;individuel;;
-NDIANG AVIGAIL;NDIANG;AVIGAIL;AVIGAIL;individuel;;
-NGA ISABELLE;NGA;ISABELLE;ISABELLE;individuel;;
-NGAKEU GLORIA;NGAKEU;GLORIA;;individuel;;
-OBELE HENRI;OBELE;HENRI;;individuel;;
-TAKAM VANAULD;TAKAM;VANAULD;;individuel;;
-TCHANA NETACY;TCHANA;NETACY;;individuel;;
-TIAKO ALFRED;TIAKO;ALFRED;;individuel;;
-YENE STEPHANE;YENE;STEPHANE;;individuel;;
-MARIA JONES;JONES;MARIAH;MARIAH;individuel;;
-MAEVA BATEG;MAEVA;BATEG;;individuel;;
-EVINEBA CLAUDE;EVINEBA;CLAUDE;EVINEBA;individuel;;
-EBOUDOU CECILE;EBOUDOU;CECILE;CECILE;individuel;;
-SERVICE RENNOVA;;;RENNOVA;collectif;;
+nom_complet;nom_famille;prenom;nom_usuel;type;service;poste;civilite
+ADANA ASTHORIE;ADANA;ASTHORIE;ASTRIDE;individuel;Call Center;;Mme
+ALIMATOU SADIA;ALIMATOU;SADIA;SADIA;individuel;RH;;Mme
+BEN AZIR;BEN;AZIR;BEN;individuel;Call Center;;Mme
+BINELI CYRILLE;BINELI;CYRILLE;;individuel;Commercial;;Mr
+ETOUNA MARIE SHARONE;ETOUNA;MARIE;MARIE;individuel;Commercial;;Mme
+MEDJO LOIC;MEDJO;LOIC;;individuel;;;Mr
+FEZZE WILLIAM;FEZZE;WILLIAM;WILLIAM;individuel;Commercial;;Mr
+NDIANG AVIGAIL;NDIANG;AVIGAIL;AVIGAIL;individuel;Direction;;Mme
+NGA ISABELLE;NGA;ISABELLE;ISABELLE;individuel;SAV;;Mme
+NGAKEU GLORIA;NGAKEU;GLORIA;;individuel;Call Center;;Mme
+OBELE HENRI;OBELE;HENRI;;individuel;Logistique;;Mr
+TAKAM VANAULD;TAKAM;VANAULD;;individuel;Technique;;Mr
+TCHANA NETACY;TCHANA;NETACY;;individuel;Informatique;;Mr
+TIAKO ALFRED;TIAKO;ALFRED;;individuel;Informatique;;Mr
+MESSOA YENE STEPHANE;YENE;STEPHANE;;individuel;Informatique;;Mr
+MARIA JONES;JONES;MARIAH;MARIAH;individuel;Commercial;;Mme
+MAEVA BATEG;MAEVA;BATEG;;individuel;Community Manager;;Mme
+EVINEBA CLAUDE;EVINEBA;CLAUDE;EVINEBA;individuel;Commercial;;Mr
+EBOUDOU CECILE;EBOUDOU;CECILE;CECILE;individuel;Commercial;;Mme
+SERVICE RENNOVA;;;RENNOVA;collectif;;;
+SOH ROMUALD;;;SOH ROMUALD;individuel;Informatique;Stagiaire;Mr

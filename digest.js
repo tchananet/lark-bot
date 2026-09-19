@@ -149,9 +149,9 @@ pas.
   permission ou une mission le justifie. Signale les absences non justifiées.
 Ne cite jamais les personnes en règle, ni celles en télétravail, ni les
 oublis de signature.
-Reprends les noms EXACTEMENT comme ils te sont fournis. N’ajoute jamais
-M., Mme ni aucune civilité : le genre des personnes ne t’est pas communiqué
-et une erreur dans un document signé de la DRH serait fâcheuse.
+Reprends les noms EXACTEMENT comme ils te sont fournis, civilite comprise
+lorsqu’elle y figure. N’en ajoute, n’en retire et n’en invente jamais aucune :
+une personne dont la civilite n’est pas fournie se nomme sans civilite.
 
 Puis une section numérotée par service ayant transmis un compte rendu, dans
 cet ordre lorsqu'ils sont présents : Direction Commerciale & Call Center,

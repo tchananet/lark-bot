@@ -229,6 +229,21 @@ function resoudreEmploye(nomBrut) {
 function ajouterEmploye(donnees) {
   const nomComplet = donnees.nom_complet;
 
+  // Un import ne doit pas defaire ce qui a ete regle ailleurs. Le CSV ne
+  // porte pas toujours le mode de travail : sans cette fusion, reimporter
+  // le registre remettait les teletravailleurs en presentiel, et ils
+  // ressortaient ABSENTS chaque jour.
+  const existant = db.prepare(`SELECT * FROM employees WHERE cle_nom = ?`)
+    .get(cleNom(nomComplet));
+
+  const modeTravail =
+    donnees.mode_travail || existant?.mode_travail || "PRESENTIEL";
+
+  const suiviPresence =
+    donnees.suivi_presence === undefined
+      ? (existant ? existant.suivi_presence : 1)
+      : (donnees.suivi_presence ? 1 : 0);
+
   const info = db.prepare(`
     INSERT INTO employees
       (nom_complet, nom_fiche, cle_nom, service, poste, type_contrat,
@@ -248,8 +263,8 @@ function ajouterEmploye(donnees) {
     donnees.service || null,
     donnees.poste || null,
     donnees.type_contrat || "INTERNE",
-    donnees.mode_travail || "PRESENTIEL",
-    donnees.suivi_presence === false ? 0 : 1,
+    modeTravail,
+    suiviPresence,
     donnees.ordre_fiche || null,
     donnees.role || null,
     donnees.civilite || null
