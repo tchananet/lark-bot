@@ -7,6 +7,7 @@ const { faitsDePonctualite } = require("./presence");
 const { localToday, allocateReportNumber } = require("./database");
 const { ecrire } = require("./docx-rapport");
 const { extractWord } = require("./extractors");
+const { ocr } = require("./mistral");
 
 // ---------------------------------------------------------------------------
 // Rapport consolide, en JSON puis en Word
@@ -221,6 +222,60 @@ function nomPresent(nom, texte) {
 }
 
 
+const CIVILITES = /^(MME|MLLE|MR|M|DR)$/;
+
+function motsDuNom(nom) {
+  return (nom || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean);
+}
+
+// Le registre ne connait pas la civilite de tout le monde. Quand elle manque,
+// le modele en met une d'autorite, et se trompe une fois sur deux : un
+// document adresse a la Direction Generale ne peut pas appeler quelqu'un
+// "M." au hasard. On ne compare donc pas les civilites, on verifie qu'aucune
+// n'est apparue devant un nom qui n'en portait pas.
+function civilitesInventees(attendus, texte) {
+  const sansCivilite = new Set();
+  const avecCivilite = new Set();
+
+  for (const personne of attendus) {
+    const mots = motsDuNom(personne.nom);
+
+    if (!mots.length) {
+      continue;
+    }
+
+    const porteUneCivilite = CIVILITES.test(mots[0]);
+    const propres = porteUneCivilite ? mots.slice(1) : mots;
+
+    for (const mot of propres) {
+      (porteUneCivilite ? avecCivilite : sansCivilite).add(mot);
+    }
+  }
+
+  const nu = (texte || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase();
+
+  const fautives = new Set();
+
+  for (const trouve of nu.matchAll(/\b(MME|MLLE|MR|M|DR)\.?\s+([A-Z][A-Z0-9'-]*)/g)) {
+    const suivant = trouve[2];
+
+    if (sansCivilite.has(suivant) && !avecCivilite.has(suivant)) {
+      fautives.add(`${trouve[1]}. ${suivant}`);
+    }
+  }
+
+  return [...fautives];
+}
+
+
 function valider(d, type, ponctualite = null) {
   const erreurs = [];
   const vide = (v) => !String(v || "").trim();
@@ -261,6 +316,12 @@ function valider(d, type, ponctualite = null) {
 
     if (oublies.length) {
       erreurs.push(`ponctualite : nom(s) omis - ${oublies.join(", ")}`);
+    }
+
+    const inventees = civilitesInventees(attendus, d.ponctualite);
+
+    if (inventees.length) {
+      erreurs.push(`ponctualite : civilite inventee pour ${inventees.join(", ")}`);
     }
   }
 
@@ -356,6 +417,28 @@ async function lirePiece(chemin, nom) {
     return { texte: await extractWord(chemin), usage: {} };
   }
 
+  // Mistral OCR d'abord : c'est un moteur de reconnaissance dedie, il coute
+  // bien moins cher que le modele de vision et il ne depend pas du lecteur de
+  // PDF d'OpenRouter, qui se met en limitation de debit sans prevenir et fait
+  // alors disparaitre un compte rendu du rapport.
+  try {
+    const pages = await ocr(chemin);
+
+    const texte = pages
+      .map((page) => (page.markdown || "").trim())
+      .filter(Boolean)
+      .join("\n\n");
+
+    if (texte) {
+      return { texte, usage: {}, moteur: "ocr" };
+    }
+  } catch (erreur) {
+    console.warn(
+      `[rapport] OCR indisponible pour ${nom} (${erreur.message}). ` +
+      `Lecture par le modele de vision.`
+    );
+  }
+
   const partie = partieFichier(chemin);
 
   if (!partie) {
@@ -377,7 +460,7 @@ async function lirePiece(chemin, nom) {
     ],
   });
 
-  return { texte, usage };
+  return { texte, usage, moteur: "vision" };
 }
 
 async function lirePiecesJointes(batch) {
@@ -412,7 +495,12 @@ async function lirePiecesJointes(batch) {
           continue;
         }
 
-        lues.push({ nom, heure: message.timestamp, texte: lecture.texte.trim() });
+        lues.push({
+          nom,
+          heure: message.timestamp,
+          texte: lecture.texte.trim(),
+          moteur: lecture.moteur || "?",
+        });
         usages.push(lecture.usage || {});
       } catch (erreur) {
         // Une piece illisible ne doit pas emporter le rapport entier : on la
@@ -434,7 +522,10 @@ async function lirePiecesJointes(batch) {
     // Le detail, et pas seulement le compte : un service declare muet alors
     // que son fichier etait bien la doit se retrouver ici.
     for (const lue of lues) {
-      console.log(`[rapport]   lue     : ${lue.nom} (${lue.texte.length} caracteres)`);
+      console.log(
+        `[rapport]   lue     : ${lue.nom} ` +
+        `(${lue.moteur}, ${lue.texte.length} caracteres)`
+      );
     }
 
     for (const ignoree of ignorees) {

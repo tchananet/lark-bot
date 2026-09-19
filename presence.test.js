@@ -330,6 +330,31 @@ verifier("un retard justifie n'a pas a etre cite", () => {
 });
 
 
+verifier("une civilite ajoutee d office est refusee", () => {
+  const faits = {
+    retards: [{ nom: "Mme ADANA ASTHORIE", justifie: false }],
+    absences_non_justifiees: [{ nom: "MEDJO LOIC" }, { nom: "TCHANA NETACY" }],
+  };
+
+  const civilites = (ponctualite) =>
+    valider({ ...DOCUMENT_MINIMAL, ponctualite }, "QUOTIDIEN", faits)
+      .filter((e) => e.includes("civilite inventee"));
+
+  // Le registre ne connait pas leur civilite : le modele ne doit pas en
+  // choisir une a leur place.
+  assert.strictEqual(
+    civilites("Mme ADANA ASTHORIE, M. MEDJO LOIC et M. TCHANA NETACY.").length,
+    1
+  );
+
+  assert.strictEqual(
+    civilites("Mme ADANA ASTHORIE, MEDJO LOIC et TCHANA NETACY.").length,
+    0,
+    "la civilite connue est conservee, les autres restent nues"
+  );
+});
+
+
 // --- Reponse du modele encadree de markdown ---------------------------------
 
 verifier("un JSON encadre de markdown reste lisible", () => {
