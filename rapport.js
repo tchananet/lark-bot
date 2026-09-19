@@ -400,6 +400,10 @@ async function produireJson(consigne, schema, type, corrections = null) {
 // ---------------------------------------------------------------------------
 
 const MAX_PIECES = Number(process.env.RAPPORT_MAX_PIECES || 20);
+
+// Mettre RAPPORT_OCR=false pour lire les pieces jointes uniquement par le
+// modele de vision, sans passer par Mistral.
+const OCR_ACTIF = process.env.RAPPORT_OCR !== "false";
 const MAX_OCTETS_PIECE = Number(process.env.RAPPORT_MAX_OCTETS_PIECE || 15 * 1024 * 1024);
 
 const CONSIGNE_LECTURE =
@@ -421,7 +425,15 @@ async function lirePiece(chemin, nom) {
   // bien moins cher que le modele de vision et il ne depend pas du lecteur de
   // PDF d'OpenRouter, qui se met en limitation de debit sans prevenir et fait
   // alors disparaitre un compte rendu du rapport.
+  //
+  // En cas d'echec, quelle qu'en soit la cause -- quota epuise, limitation de
+  // debit, panne --, la lecture repart sur le modele de vision. Le rapport
+  // sort dans tous les cas ; seul son cout change.
   try {
+    if (OCR_ACTIF === false) {
+      throw new Error("OCR desactive par RAPPORT_OCR");
+    }
+
     const pages = await ocr(chemin);
 
     const texte = pages
