@@ -177,6 +177,12 @@ function afficher(date, options = {}) {
 // debut du texte obtenu : c'est la seule facon de voir quelle date le modele
 // a sous les yeux. Compter environ un demi-centime par piece.
 async function transcrire(date) {
+  // Un diagnostic qui reste bloque n'apprend rien. On coupe court : une
+  // seule tentative, et deux minutes au maximum par piece. Mieux vaut un
+  // echec annonce qu'une attente sans fin.
+  process.env.IA_TENTATIVES = process.env.IA_TENTATIVES || "1";
+  process.env.IA_TIMEOUT_VISION = process.env.IA_TIMEOUT_VISION || "120000";
+
   const { lirePiece } = require("./rapport");
   const { lignes } = messagesDe(date);
 
@@ -194,8 +200,16 @@ async function transcrire(date) {
         continue;
       }
 
+      // Affiche avant l'appel : si rien ne suit, c'est que la lecture de
+      // CETTE piece est la ou tout se bloque.
+      process.stdout.write("     lecture en cours...");
+
+      const depart = Date.now();
+
       try {
         const lecture = await lirePiece(piece.file_path, nom);
+
+        console.log(` ${Math.round((Date.now() - depart) / 1000)}s`);
 
         if (!lecture || !(lecture.texte || "").trim()) {
           console.log("     NON LUE : format non pris en charge, ou texte vide.");
@@ -210,6 +224,7 @@ async function transcrire(date) {
           console.log("     | ...");
         }
       } catch (erreur) {
+        console.log(` ${Math.round((Date.now() - depart) / 1000)}s`);
         console.log(`     NON LUE : ${erreur.message}`);
       }
     }
