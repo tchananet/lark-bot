@@ -55,14 +55,26 @@ function messagesDe(date) {
   };
 }
 
-function apercu(message) {
-  const texte = (message.content || "").replace(/\s+/g, " ").trim();
+const COMPLET = process.argv.includes("--complet");
 
-  if (texte) {
-    return texte.length > 90 ? `${texte.slice(0, 90)}...` : texte;
+function apercu(message) {
+  const brut = (message.content || "").trim();
+
+  if (!brut) {
+    return message.pieces
+      ? `(${message.pieces} piece(s) jointe(s), sans texte)`
+      : "(vide)";
   }
 
-  return message.pieces ? `(${message.pieces} piece(s) jointe(s), sans texte)` : "(vide)";
+  // La date que le modele a retenue se trouve presque toujours dans les
+  // premieres lignes du compte rendu : --complet les donne en entier.
+  if (COMPLET) {
+    return brut.split("\n").join("\n     ");
+  }
+
+  const texte = brut.replace(/\s+/g, " ");
+
+  return texte.length > 90 ? `${texte.slice(0, 90)}...` : texte;
 }
 
 function afficher(date, options = {}) {
@@ -135,8 +147,14 @@ afficher(decale(-1), { bref: true });
 afficher(decale(1), { bref: true });
 
 console.log(
-  `\nPour voir le detail d'une fenetre voisine : ` +
-  `node verifier-rapport.js ${decale(-1)}\n`
+  `\nDetail d'une fenetre voisine : node verifier-rapport.js ${decale(-1)}`
 );
+
+if (!COMPLET) {
+  console.log(
+    `Texte integral des comptes rendus, pour voir quelle date ils annoncent : ` +
+    `node verifier-rapport.js ${date} --complet\n`
+  );
+}
 
 process.exitCode = 0;

@@ -281,6 +281,12 @@ function valider(d, type, ponctualite = null) {
     if (vide(a.service) || vide(a.action)) erreurs.push("action incomplete");
   }
 
+  // Un rapport qui releve des points d attention sans rien demander a
+  // personne ne sert a rien : la Direction Generale attend des suites.
+  if ((d.points_attention || []).length && !(d.actions || []).length) {
+    erreurs.push("des points d attention sont releves mais aucune action n est proposee");
+  }
+
   // Le JSON recopie se cherche dans les textes REDIGES, pas dans la
   // structure : stringifier l'objet entier trouve forcement des accolades.
   const redige = [

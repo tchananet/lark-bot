@@ -174,8 +174,14 @@ function corpsQuotidien(d) {
 
   ajouter(paragraphe("", { apres: 160 }), titreSection("Actions prioritaires"));
 
-  for (const a of d.actions) {
-    ajouter(paragraphe(`• ${a.service} — ${a.action}`));
+  // Un intitule seul, sans une ligne dessous, se lit comme un defaut
+  // d impression. On dit plutot ce qu il en est.
+  if (d.actions.length) {
+    for (const a of d.actions) {
+      ajouter(paragraphe(`• ${a.service} — ${a.action}`));
+    }
+  } else {
+    ajouter(paragraphe("Aucune action prioritaire retenue pour cette journée."));
   }
 
   ajouter(paragraphe("", { apres: 160 }), titreSection("Conclusion"));
