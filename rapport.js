@@ -428,8 +428,18 @@ async function lirePiecesJointes(batch) {
   if (lues.length || ignorees.length) {
     console.log(
       `[rapport] pieces jointes : ${lues.length} lue(s), ` +
-      `${ignorees.length} ignoree(s), ${cout.toFixed(6)}`
+      `${ignorees.length} ignoree(s), $${cout.toFixed(6)}`
     );
+
+    // Le detail, et pas seulement le compte : un service declare muet alors
+    // que son fichier etait bien la doit se retrouver ici.
+    for (const lue of lues) {
+      console.log(`[rapport]   lue     : ${lue.nom} (${lue.texte.length} caracteres)`);
+    }
+
+    for (const ignoree of ignorees) {
+      console.warn(`[rapport]   ignoree : ${ignoree}`);
+    }
   }
 
   return { lues, ignorees, cout };
@@ -477,6 +487,17 @@ async function construireQuotidien(date) {
 
   const numero = allocateReportNumber(date);
 
+  // Une piece que le programme n'a pas su lire doit figurer DANS le document,
+  // pas seulement dans le message qui l'accompagne : sinon le rapport affirme
+  // qu'un service n'a rien transmis alors que son fichier etait bien la, et
+  // rien dans le document ne permet de s'en apercevoir.
+  const manquantes = [
+    ...(donnees.donnees_manquantes || []),
+    ...pieces.ignorees.map(
+      (piece) => `Piece jointe non lue par le programme : ${piece}`
+    ),
+  ];
+
   return {
     statut: erreurs.length ? "defauts" : "ok",
     erreurs,
@@ -493,6 +514,7 @@ async function construireQuotidien(date) {
       titre_date: enFrancais(date).toUpperCase(),
       signature: SIGNATURE,
       ...donnees,
+      donnees_manquantes: manquantes,
     },
   };
 }
