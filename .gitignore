@@ -3,3 +3,11 @@ downloads
 .env
 lark-bot.db
 Rapport_Consolide_Alpha_Motors_*.docx
+
+# Documents RH deposes pour mise au point : donnees nominatives, hors depot.
+debug.log
+bot.js
+*.pdf
+fiche presence*
+FICHE DE PRESENCE*
+Rapport_Hebdomadaire_*.docx
