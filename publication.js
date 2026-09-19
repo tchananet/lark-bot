@@ -62,6 +62,75 @@ async function envoyerFichier(chatId, chemin) {
 }
 
 
+// Le meme document que le .docx, en texte, pour une lecture au terminal.
+// L'ordre des sections suit celui du rendu Word, sans quoi comparer les deux
+// deviendrait un exercice.
+function enTexte(d) {
+  const lignes = [d.numero, "", `${d.ville}, le ${d.date_redaction}`, ""];
+
+  lignes.push(`RAPPORT JOURNALIER CONSOLIDÉ DES ACTIVITÉS – ${d.titre_date}`, "");
+  lignes.push(d.intro, "");
+
+  let n = 1;
+  const titre = (libelle) => `${String(n++).padStart(2, "0")} ${libelle}`;
+
+  lignes.push(titre("Synthèse générale"));
+
+  if ((d.synthese || []).length) {
+    for (const s of d.synthese) {
+      lignes.push(`  ${s.libelle} : ${s.valeur} — ${s.lecture}`);
+    }
+  } else {
+    lignes.push("  Aucun indicateur chiffré transmis ce jour.");
+  }
+
+  lignes.push("", titre("Ponctualité"), `  ${d.ponctualite}`, "");
+
+  for (const service of d.services || []) {
+    lignes.push(titre(service.nom));
+
+    for (const l of service.lignes || []) {
+      lignes.push(
+        `  • ${l.libelle} — ${l.description}` +
+        (l.suite ? ` | Suite attendue : ${l.suite}` : "")
+      );
+    }
+
+    lignes.push("");
+  }
+
+  lignes.push(titre("Points d'attention"));
+
+  for (const p of d.points_attention || []) {
+    lignes.push(`  • [${p.priorite}] ${p.intitule} — ${p.constat}`);
+  }
+
+  for (const manque of d.donnees_manquantes || []) {
+    lignes.push(`  • ${manque}`);
+  }
+
+  lignes.push("", titre("Actions prioritaires"));
+
+  if ((d.actions || []).length) {
+    for (const a of d.actions) {
+      lignes.push(`  • ${a.service} — ${a.action}`);
+    }
+  } else {
+    lignes.push("  Aucune action prioritaire retenue pour cette journée.");
+  }
+
+  lignes.push("", titre("Conclusion"));
+
+  for (const para of d.conclusion || []) {
+    lignes.push(`  ${para}`);
+  }
+
+  lignes.push("", d.signature, "");
+
+  return lignes.join("\n");
+}
+
+
 async function publierRapport(options = {}) {
   const date = options.date || localReportDate();
   const chatId = options.chatId || process.env.LARK_REPORT_CHAT_ID;
@@ -101,11 +170,20 @@ async function publierRapport(options = {}) {
     console.log(
       `[rapport] ${resultat.modele}, ` +
       `${resultat.usage.prompt_tokens || 0}+${resultat.usage.completion_tokens || 0} tokens, ` +
-      `${(Number(resultat.usage.cost || 0) + Number(resultat.cout_pieces || 0)).toFixed(6)}`
+      `$${(Number(resultat.usage.cost || 0) + Number(resultat.cout_pieces || 0)).toFixed(6)}`
     );
 
     if (essaiSeul) {
       console.log(`[rapport] (essai) fichier ecrit : ${resultat.chemin}`);
+
+      // Un essai lance sur le serveur produit un .docx que personne ne peut
+      // ouvrir la-bas. Le meme contenu est donc ecrit en clair a l ecran.
+      console.log(`\n${enTexte(resultat.document)}`);
+
+      if (reserves.length) {
+        console.log(`À vérifier : ${reserves.join(", ")}\n`);
+      }
+
       return { ...resultat, statut: "essai", reserves };
     }
 
@@ -143,7 +221,7 @@ async function publierRapport(options = {}) {
   }
 }
 
-module.exports = { publierRapport, envoyerTexte, envoyerFichier, DOSSIER };
+module.exports = { publierRapport, enTexte, envoyerTexte, envoyerFichier, DOSSIER };
 
 // Execution manuelle : node publication.js [AAAA-MM-JJ] [--essai]
 if (require.main === module) {
