@@ -141,12 +141,13 @@ sur l'expediteur ne t'est fournie. Le service concerne et les personnes citees
 se deduisent du seul contenu des messages et des pieces jointes.
 
 REGLE DE DATE
-Les services transmettent leur compte rendu entre 17h le jour concerne et 16h
-le lendemain : un compte rendu recu le matin porte presque toujours sur la
-VEILLE. L'heure d'arrivee d'un message n'indique jamais la journee qu'il
-couvre ; fie-toi a la date annoncee dans le compte rendu lui-meme. Un compte
-rendu portant manifestement sur une autre journee ne doit pas etre compte :
-signale-le dans donnees_manquantes.
+Les pieces jointes qui te sont soumises ont DEJA ete datees par le programme :
+celles qui portaient sur une autre journee ont ete retirees du dossier avant
+de te parvenir, et le document le mentionnera de lui-meme. Ne te demande donc
+plus si une piece concerne bien la journee couverte : elle la concerne. Ne
+rejette rien pour un motif de date, et ne mentionne aucune piece absente.
+Les messages ecrits directement dans la conversation, eux, ne sont pas dates :
+un message recu le matin porte presque toujours sur la VEILLE.
 
 CHAMPS
 intro : une phrase citant uniquement les services ayant reellement transmis.
@@ -167,22 +168,21 @@ ponctualite : une a trois phrases, en texte suivi. Les donnees de ponctualite
 services : un element par service ayant transmis, dans cet ordre lorsqu'ils
   sont presents : Direction Commerciale & Call Center, Service Informatique,
   Service Apres-Vente, puis les autres. N'ouvre une section QUE pour un
-  service dont le compte rendu porte sur la journee couverte et decrit des
-  activites precises. Un compte rendu portant sur une autre journee, ou un
-  document qui n'est pas un compte rendu d'activite, ne donne AUCUNE section :
-  il figure uniquement dans donnees_manquantes. Une section faite de
-  generalites ("le service a poursuivi ses activites") est une invention :
-  supprime-la. Pour un service d'activites, chaque
-  ligne porte un libelle EN MAJUSCULES, une description factuelle, et suite
-  vide. Pour le Service Apres-Vente, libelle est le nom du client et suite
-  l'action attendue.
+  service decrivant des activites precises. Un document qui n'est pas un
+  compte rendu d'activite ne donne AUCUNE section : il figure uniquement dans
+  donnees_manquantes. Une section faite de generalites ("le service a
+  poursuivi ses activites") est une invention : supprime-la. Pour un service
+  d'activites, chaque ligne porte un libelle EN MAJUSCULES, une description
+  factuelle, et suite vide. Pour le Service Apres-Vente, libelle est le nom du
+  client et suite l'action attendue.
 points_attention : priorite HAUTE, MOYENNE ou BASSE.
 actions : une entree par service concerne.
 conclusion : deux ou trois paragraphes. Volume d'activite, ce qui a ete
   concretise ou non, ce qui reste en suspens.
 donnees_manquantes : un element par service attendu dont le compte rendu n'est
-  pas arrive, et un element par compte rendu portant sur une autre journee.
-  Liste vide si tout est la.
+  pas arrive. Liste vide si tout est la. Le programme y ajoute lui-meme les
+  pieces qu'il n'a pas su lire et celles qui portaient sur une autre journee :
+  ne les devine pas, ne les anticipe pas.
 
 REGLES DE FOND
 - N'invente jamais un chiffre, un nom, un dossier ni une activite.
@@ -537,6 +537,101 @@ async function lirePiecesJointes(batch) {
 }
 
 
+// ---------------------------------------------------------------------------
+// A quelle journee se rapporte un compte rendu
+//
+// Laisser le modele redacteur en juger produisait un document qui se
+// contredit : il ecartait le compte rendu du Call Center en le declarant du
+// 16, et en reprenait les chiffres dans la synthese. Une piece est donc datee
+// AVANT d'etre soumise, et celle qui porte sur une autre journee ne lui est
+// jamais montree. Ce n'est plus une consigne a respecter, c'est une piece
+// absente du dossier.
+// ---------------------------------------------------------------------------
+
+const SCHEMA_JOURNEE = {
+  type: "object",
+  properties: {
+    date: {
+      type: ["string", "null"],
+      description: "Journee couverte au format AAAA-MM-JJ, ou null si indeterminable",
+    },
+    indice: { type: "string" },
+  },
+  required: ["date", "indice"],
+};
+
+async function journeeDuComptRendu(piece, dateAttendue) {
+  const { donnees } = await genererJson({
+    tache: "ROUTAGE",
+    temperature: 0,
+    schema: SCHEMA_JOURNEE,
+    messages: [
+      {
+        role: "user",
+        content:
+          `Voici un compte rendu d'activite transmis a ALPHA MOTORS.\n\n` +
+          `Sur QUELLE JOURNEE porte-t-il ? Cherche la date annoncee dans le\n` +
+          `titre, l'en-tete ou le corps du document. Le nom du fichier est un\n` +
+          `indice, jamais une preuve : il est frequemment recopie de la veille.\n` +
+          `Si aucune date ne ressort clairement, laisse date vide plutot que\n` +
+          `de deviner. Journee du rapport en preparation : ${dateAttendue}.\n\n` +
+          `Dans indice, recopie MOT POUR MOT le passage du document qui porte\n` +
+          `cette date, et rien d'autre. Si tu n'as trouve aucune date, ecris\n` +
+          `indice vide. Ne recopie jamais la presente consigne.\n\n` +
+          // L'heure d'envoi n'est volontairement pas fournie : le modele s'en
+          // servait comme date du compte rendu, ce qui est precisement l'erreur
+          // que cette etape doit empecher.
+          `NOM DU FICHIER : ${piece.nom}\n\n` +
+          `CONTENU :\n${piece.texte.slice(0, 6000)}`,
+      },
+    ],
+  });
+
+  // Le modele repond volontiers la CHAINE "null" plutot que rien. Sans ce
+  // filtre, elle serait comparee a la date du rapport, ne correspondrait pas,
+  // et ferait ecarter une piece dont on ignore simplement la date.
+  const date = String(donnees?.date || "").trim();
+
+  return {
+    date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    indice: donnees?.indice || "",
+  };
+}
+
+async function trierParJournee(lues, date) {
+  const retenues = [];
+  const autresJournees = [];
+
+  for (const piece of lues) {
+    let journee = null;
+
+    try {
+      journee = await journeeDuComptRendu(piece, date);
+    } catch (erreur) {
+      // Dater est un confort, pas une condition : en cas d'echec la piece
+      // est soumise, comme avant.
+      console.warn(`[rapport] datation de ${piece.nom} impossible : ${erreur.message}`);
+    }
+
+    // Une date indeterminee ne fait pas ecarter : mieux vaut un compte rendu
+    // de trop qu'un service declare muet a tort.
+    if (!journee?.date || journee.date === date) {
+      retenues.push(piece);
+      continue;
+    }
+
+    autresJournees.push({ ...piece, journee: journee.date, indice: journee.indice });
+
+    console.warn(
+      `[rapport]   ecartee : ${piece.nom} porte sur le ${journee.date} ` +
+      `(${journee.indice})`
+    );
+  }
+
+  return { retenues, autresJournees };
+}
+
+
 async function construireQuotidien(date) {
   const batch = prepareDailyBatch(date);
   const ponctualite = faitsDePonctualite(date);
@@ -546,6 +641,7 @@ async function construireQuotidien(date) {
   }
 
   const pieces = await lirePiecesJointes(batch);
+  const tri = await trierParJournee(pieces.lues, date);
 
   const contexte =
     `${consigneQuotidien(date)}\n\n` +
@@ -553,8 +649,8 @@ async function construireQuotidien(date) {
     `${JSON.stringify(ponctualite)}\n\n` +
     `COMPTES RENDUS RECUS :\n` +
     `${JSON.stringify(batch.messages.map((m) => ({ heure: m.timestamp, texte: m.text })))}` +
-    (pieces.lues.length
-      ? `\n\nPIECES JOINTES (transcrites) :\n${JSON.stringify(pieces.lues)}`
+    (tri.retenues.length
+      ? `\n\nPIECES JOINTES (transcrites) :\n${JSON.stringify(tri.retenues)}`
       : "");
 
   let { donnees, usage, modele } = await produireJson(contexte, SCHEMA_QUOTIDIEN, "QUOTIDIEN");
@@ -586,6 +682,11 @@ async function construireQuotidien(date) {
     ...(donnees.donnees_manquantes || []),
     ...pieces.ignorees.map(
       (piece) => `Piece jointe non lue par le programme : ${piece}`
+    ),
+    ...tri.autresJournees.map(
+      (piece) =>
+        `${piece.nom} porte sur la journee du ${enFrancais(piece.journee)} ` +
+        `et n'est pas repris ici (${piece.indice}).`
     ),
   ];
 
@@ -635,6 +736,8 @@ async function produireQuotidien(date, dossier = ".") {
 
 module.exports = {
   lirePiece,
+  journeeDuComptRendu,
+  trierParJournee,
   lirePiecesJointes,
   construireQuotidien,
   produireQuotidien,
