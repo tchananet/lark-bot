@@ -105,9 +105,42 @@ async function traiterPlanning(fichiers, repondre) {
 }
 
 
-async function traiterAbsences(absences, expediteur, repondre) {
+// Le 19 septembre, deux messages sans le moindre nom -- "planning de la
+// semaine", puis "voila, une nouvelle fois" -- ont produit six absences
+// completes, avec noms, dates, types et motifs, toutes inscrites en base. Le
+// modele n'avait rien a lire et a comble le vide.
+//
+// Aucune consigne ne protege de cela de facon fiable. On verifie donc que la
+// personne est REELLEMENT nommee dans le message avant d'ecrire quoi que ce
+// soit : ce que le message ne dit pas ne peut pas etre enregistre.
+function sansAccents(valeur) {
+  return String(valeur || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase();
+}
+
+function citeDansLeMessage(nom, texte) {
+  const corps = sansAccents(texte);
+
+  if (!corps.trim()) {
+    return false;
+  }
+
+  const mots = sansAccents(nom)
+    .split(/[^A-Z0-9]+/)
+    .filter((mot) => mot.length > 2);
+
+  // Un seul mot du nom suffit : la DRH ecrit "Isabelle est en formation",
+  // pas le nom complet du registre.
+  return mots.some((mot) => corps.includes(mot));
+}
+
+
+async function traiterAbsences(absences, expediteur, repondre, texte = "") {
   const enregistrees = [];
   const inconnues = [];
+  const inventees = [];
 
   for (const absence of absences) {
     const { employe } = resoudreEmploye(absence.personne);
@@ -116,6 +149,12 @@ async function traiterAbsences(absences, expediteur, repondre) {
     // une faute de frappe fabriquerait une personne fantome.
     if (!employe) {
       inconnues.push(absence.personne);
+      continue;
+    }
+
+    if (!citeDansLeMessage(absence.personne, texte) &&
+        !citeDansLeMessage(employe.nom_complet, texte)) {
+      inventees.push(employe.nom_complet);
       continue;
     }
 
@@ -149,6 +188,18 @@ async function traiterAbsences(absences, expediteur, repondre) {
     message +=
       `${message ? "\n\n" : ""}Nom(s) non reconnu(s) dans le registre : ` +
       `${inconnues.join(", ")}. Rien n'a ete enregistre pour eux.`;
+  }
+
+  if (inventees.length) {
+    console.warn(
+      `[assistant] absences ecartees, personne non citee dans le message : ` +
+      `${inventees.join(", ")} -- message : ${JSON.stringify(texte.slice(0, 120))}`
+    );
+
+    message +=
+      `${message ? "\n\n" : ""}Votre message ne nomme personne. ` +
+      `Rien n'a ete enregistre. Si vous vouliez declarer une absence, ` +
+      `precisez la personne, la date et le motif.`;
   }
 
   await repondre(message || "Aucune absence exploitable dans ce message.");
@@ -194,7 +245,7 @@ function dateDeLaCorrection(correction, employe) {
 }
 
 
-async function traiterCorrections(corrections, expediteur, repondre) {
+async function traiterCorrections(corrections, expediteur, repondre, texte = "") {
   const faites = [];
   const impossibles = [];
 
@@ -203,6 +254,16 @@ async function traiterCorrections(corrections, expediteur, repondre) {
 
     if (!employe) {
       impossibles.push(`${correction.personne} : nom inconnu du registre.`);
+      continue;
+    }
+
+    // Meme garde que pour les absences : une heure de pointage corrigee
+    // au nom de quelqu un que le message ne mentionne pas est une invention.
+    if (!citeDansLeMessage(correction.personne, texte) &&
+        !citeDansLeMessage(employe.nom_complet, texte)) {
+      impossibles.push(
+        `${employe.nom_complet} : votre message ne le nomme pas. Rien corrige.`
+      );
       continue;
     }
 
@@ -373,11 +434,11 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
       return analyse;
 
     case "PERMISSION":
-      await traiterAbsences(analyse.absences, expediteur, repondre);
+      await traiterAbsences(analyse.absences, expediteur, repondre, texte);
       return analyse;
 
     case "CORRECTION":
-      await traiterCorrections(analyse.corrections, expediteur, repondre);
+      await traiterCorrections(analyse.corrections, expediteur, repondre, texte);
       return analyse;
 
     case "GESTION_ACCES":
