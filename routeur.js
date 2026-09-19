@@ -1,7 +1,4 @@
-const fs = require("fs");
-const path = require("path");
-
-const { genererJson } = require("./gemini");
+const { genererJson, messageUtilisateur } = require("./ia");
 const { localToday } = require("./database");
 
 // ---------------------------------------------------------------------------
@@ -11,14 +8,6 @@ const { localToday } = require("./database");
 // ce qu'il doit faire. Les documents sont classes d'apres leur contenu, pas
 // d'apres leur nom de fichier.
 // ---------------------------------------------------------------------------
-
-const MIME = {
-  ".pdf": "application/pdf",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-};
 
 const INTENTIONS = [
   "POINTAGE",
@@ -167,41 +156,17 @@ REGLES
 }
 
 
-function partieFichier(chemin) {
-  const mimeType = MIME[path.extname(chemin || "").toLowerCase()];
-
-  if (!mimeType || !fs.existsSync(chemin)) {
-    return null;
-  }
-
-  return {
-    inlineData: { mimeType, data: fs.readFileSync(chemin).toString("base64") },
-  };
-}
-
-
 async function analyser({ texte = "", fichiers = [] } = {}) {
   const aujourdhui = localToday();
 
-  const parts = [{ text: prompt(aujourdhui, fichiers.length > 0) }];
+  const consigne = prompt(aujourdhui, fichiers.length > 0);
+  const corps = texte.trim() ? `${consigne}\n\nMESSAGE RECU :\n${texte.trim()}` : consigne;
 
-  if (texte.trim()) {
-    parts.push({ text: `\nMESSAGE RECU :\n${texte.trim()}` });
-  }
-
-  for (const chemin of fichiers) {
-    const partie = partieFichier(chemin);
-
-    if (partie) {
-      parts.push({ text: `\nPIECE JOINTE : ${path.basename(chemin)}` });
-      parts.push(partie);
-    }
-  }
-
-  const analyse = await genererJson({
-    contents: [{ role: "user", parts }],
+  const { donnees: analyse } = await genererJson({
+    tache: "ROUTAGE",
+    messages: [messageUtilisateur(corps, fichiers)],
     schema: SCHEMA,
-    config: { temperature: 0 },
+    temperature: 0,
   });
 
   return {

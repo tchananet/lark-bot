@@ -1,8 +1,4 @@
-const fs = require("fs");
-const path = require("path");
-
-const { GoogleGenAI } = require("@google/genai");
-const { genererJson } = require("./gemini");
+const { genererJson, messageUtilisateur } = require("./ia");
 const { normaliserHeure } = require("./temps");
 const { lirePointage: lireOcrMistral } = require("./mistral");
 const {
@@ -14,14 +10,6 @@ const {
   cleNom,
 } = require("./hr");
 
-const MIME = {
-  ".pdf": "application/pdf",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-};
-
 // Deux lectures independantes de la meme feuille manuscrite. La temperature
 // n'est pas nulle : a temperature nulle les deux passes renverraient la meme
 // chose, y compris la meme erreur, et la comparaison ne prouverait rien. On
@@ -29,36 +17,12 @@ const MIME = {
 // desaccord.
 const TEMPERATURE_EXTRACTION = Number(process.env.RH_TEMPERATURE_EXTRACTION || 0.4);
 
-// La lecture dune fiche manuscrite numerisee est bien plus lente quune
-// synthese de texte : 120 s ne suffisent pas pour un scan de plusieurs Mo.
-const TIMEOUT_EXTRACTION_MS = Number(process.env.RH_TIMEOUT_EXTRACTION_MS || 300000);
-
-function clientExtraction() {
-  return new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
-    httpOptions: { timeout: TIMEOUT_EXTRACTION_MS },
-  });
-}
-
 const CHAMPS_HORAIRES = [
   "heure_arrivee",
   "heure_depart_pause",
   "heure_retour_pause",
   "heure_depart",
 ];
-
-
-function partieFichier(chemin) {
-  const mimeType = MIME[path.extname(chemin).toLowerCase()];
-
-  if (!mimeType) {
-    throw new Error(`Format non pris en charge pour l'extraction : ${chemin}`);
-  }
-
-  return {
-    inlineData: { mimeType, data: fs.readFileSync(chemin).toString("base64") },
-  };
-}
 
 
 // ---------------------------------------------------------------------------
@@ -136,12 +100,13 @@ Regles de transcription :
 }
 
 
-async function lirePointageUnePasse(chemin, ai) {
-  const donnees = await genererJson({
-    contents: [{ role: "user", parts: [{ text: promptPointage() }, partieFichier(chemin)] }],
+async function lirePointageUnePasse(chemin) {
+  const { donnees } = await genererJson({
+    tache: "VISION",
+    messages: [messageUtilisateur(promptPointage(), [chemin])],
     schema: SCHEMA_POINTAGE,
-    config: { temperature: TEMPERATURE_EXTRACTION },
-  }, { ai });
+    temperature: TEMPERATURE_EXTRACTION,
+  });
 
   const parJour = new Map();
 
@@ -282,7 +247,7 @@ async function extrairePointage(chemin, options = {}) {
   // moteurs signale precisement les cellules reellement ambigues.
   const [passeA, passeB] = await Promise.all([
     lirePointageMistral(chemin),
-    lirePointageUnePasse(chemin, clientExtraction()),
+    lirePointageUnePasse(chemin),
   ]);
 
   const { retenus, divergences } = confronter(passeA, passeB);
@@ -387,11 +352,12 @@ une liste vide.`;
 async function extrairePlanning(chemin, options = {}) {
   const documentId = options.documentId || null;
 
-  const donnees = await genererJson({
-    contents: [{ role: "user", parts: [{ text: PROMPT_PLANNING }, partieFichier(chemin)] }],
+  const { donnees } = await genererJson({
+    tache: "VISION",
+    messages: [messageUtilisateur(PROMPT_PLANNING, [chemin])],
     schema: SCHEMA_PLANNING,
-    config: { temperature: 0 },
-  }, { ai: clientExtraction() });
+    temperature: 0,
+  });
 
   let enregistres = 0;
   const enRevue = [];
@@ -458,11 +424,14 @@ Reponds par la categorie et une justification d'une phrase.`;
 
 
 async function classerDocument(chemin) {
-  return genererJson({
-    contents: [{ role: "user", parts: [{ text: PROMPT_CLASSEMENT }, partieFichier(chemin)] }],
+  const { donnees } = await genererJson({
+    tache: "VISION",
+    messages: [messageUtilisateur(PROMPT_CLASSEMENT, [chemin])],
     schema: SCHEMA_CLASSEMENT,
-    config: { temperature: 0 },
-  }, { ai: clientExtraction() });
+    temperature: 0,
+  });
+
+  return donnees;
 }
 
 module.exports = {

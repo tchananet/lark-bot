@@ -6,7 +6,7 @@ const Lark = require("@larksuiteoapi/node-sdk");
 
 const { prepareDailyBatch } = require("./batch");
 const { faitsDePonctualite } = require("./presence");
-const { generer } = require("./gemini");
+const { generer, messageUtilisateur } = require("./ia");
 const {
   localToday,
   localReportDate,
