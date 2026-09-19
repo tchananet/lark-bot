@@ -13,7 +13,12 @@ services:
       LARK_APP_SECRET: ${LARK_APP_SECRET} 
       LARK_REPORT_CHAT_ID: ${LARK_REPORT_CHAT_ID}
       LARK_APP_ID: ${LARK_APP_ID}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+
+      # Tous les appels au modele passent par OpenRouter. Sans cette cle, le
+      # bot demarre mais echoue des la premiere lecture de document.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+
+      # Mistral n est garde que pour l OCR des fiches manuscrites.
       MISTRAL_API: ${MISTRAL_API}
 
       # Identifiant Lark de la DRH. Sans lui, la reconnaissance retombe sur
@@ -36,3 +41,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./downloads:/app/downloads
+
+      # Les rapports produits restent sur l hote : ils survivent a une
+      # reconstruction de l image et se relisent sans passer par Lark.
+      - ./rapports:/app/rapports

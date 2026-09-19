@@ -195,9 +195,26 @@ async function generer(options) {
 }
 
 
+// Certains modeles encadrent leur JSON d une cloture markdown malgre la
+// consigne de schema. La retirer coute une ligne ; la refuser coute un
+// rapport.
+function sansCloture(texte) {
+  const nu = (texte || "").trim();
+
+  if (!nu.startsWith("```")) {
+    return nu;
+  }
+
+  return nu
+    .replace(/^```[a-zA-Z]*[ \t]*\r?\n?/, "")
+    .replace(/\r?\n?```[ \t]*$/, "")
+    .trim();
+}
+
+
 async function genererJson(options) {
   const resultat = await generer(options);
-  const brut = (resultat.texte || "").trim();
+  const brut = sansCloture(resultat.texte);
 
   // Le mode strict n'est pas toujours honore : on echoue bruyamment plutot
   // que de laisser passer un objet a moitie lu.
@@ -230,6 +247,7 @@ function messageUtilisateur(texte, fichiers = []) {
 
 module.exports = {
   MODELES,
+  sansCloture,
   generer,
   genererJson,
   partieFichier,

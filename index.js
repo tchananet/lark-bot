@@ -6,7 +6,7 @@ const { extractWord } = require("./extractors");
 const cron = require("node-cron");
 const Lark = require("@larksuiteoapi/node-sdk");
 const { traiter } = require("./assistant");
-const { runDigest } = require("./digest");
+const { publierRapport } = require("./publication");
 const {
   saveMessage,
   saveAttachment,  saveUser,   claimMessage,
@@ -696,7 +696,14 @@ const DIGEST_TIMEZONE = process.env.DIGEST_TIMEZONE || "Africa/Douala";
 if (process.env.DIGEST_ENABLED === "false") {
   console.log("Rapport quotidien desactive (DIGEST_ENABLED=false)");
 } else {
-  cron.schedule(DIGEST_CRON, () => runDigest(), {
+  // publierRapport signale lui-meme ses echecs dans Lark ; ce filet ne
+  // couvre que ce qui casse avant, par exemple une configuration absente.
+  const lancerRapport = () =>
+    publierRapport().catch((erreur) =>
+      console.error("[rapport] planification :", erreur?.message || erreur)
+    );
+
+  cron.schedule(DIGEST_CRON, lancerRapport, {
     timezone: DIGEST_TIMEZONE,
     name: "rapport-quotidien",
     noOverlap: true,

@@ -6,8 +6,8 @@
   "scripts": {
     "test": "node presence.test.js",
     "start": "node index.js",
-    "digest": "node digest.js",
-    "import-employes": "node import-employes.js"
+    "import-employes": "node import-employes.js",
+    "rapport": "node publication.js"
   },
   "keywords": [],
   "author": "",

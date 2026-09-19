@@ -10,6 +10,7 @@ npm-debug.log*
 # Données runtime — montées en volume par docker-compose
 data
 downloads
+rapports
 *.db
 
 .git

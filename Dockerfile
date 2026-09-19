@@ -16,6 +16,6 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-RUN mkdir -p /app/data /app/downloads
+RUN mkdir -p /app/data /app/downloads /app/rapports
 
 CMD ["node", "index.js"]

@@ -1,6 +1,6 @@
 const { analyser } = require("./routeur");
 const { extrairePointage, extrairePlanning } = require("./extraction");
-const { runDigest } = require("./digest");
+const { publierRapport } = require("./publication");
 const { evaluerJournee } = require("./presence");
 const { localReportDate } = require("./database");
 const {
@@ -331,21 +331,28 @@ async function traiterAcces(acces, expediteur, repondre) {
 async function traiterDemandeRapport(date, repondre) {
   const cible = date || localReportDate();
 
-  await repondre(`Generation du rapport du ${cible} en cours...`);
+  await repondre(`Génération du rapport du ${cible} en cours...`);
 
-  const resultat = await runDigest({ date: cible });
+  const resultat = await publierRapport({ date: cible });
 
-  if (resultat.status === "empty") {
-    await repondre(`Aucun compte rendu enregistre pour le ${cible}.`);
+  if (resultat.statut === "vide") {
+    await repondre(`Aucun compte rendu ni fiche de présence pour le ${cible}.`);
     return;
   }
 
-  if (resultat.status === "error") {
-    await repondre(`La generation du rapport du ${cible} a echoue. Voir les logs.`);
+  if (resultat.statut === "erreur") {
+    await repondre(`La génération du rapport du ${cible} a échoué. Voir les logs.`);
     return;
   }
 
-  await repondre("Rapport publie dans le groupe de suivi.");
+  await repondre(
+    "Rapport publié dans le groupe de suivi." +
+    (resultat.reserves && resultat.reserves.length
+      ? `
+
+À vérifier : ${resultat.reserves.join(", ")}`
+      : "")
+  );
 }
 
 

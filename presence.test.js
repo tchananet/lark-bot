@@ -2,6 +2,8 @@ const assert = require("assert");
 
 const { evaluerLigne, STATUTS } = require("./presence");
 const { enMinutes, normaliserHeure, veilleDe } = require("./temps");
+const { valider } = require("./rapport");
+const { sansCloture } = require("./ia");
 
 let reussis = 0;
 
@@ -236,6 +238,104 @@ verifier("une case illisible n'est pas presentee comme non signee", () => {
 
   assert.ok(/illisible/.test(r.note));
   assert.ok(!/non signee/.test(r.note), "la personne a signe, c'est la lecture qui echoue");
+});
+
+// --- Le rapport ne peut pas passer un nom sous silence -----------------------
+//
+// Le modele resume volontiers une longue liste de noms ("dix-huit absences
+// ont ete constatees"). Pour un rapport RH, une personne qui disparait du
+// texte est une personne dont l'absence n'est jamais traitee : le controle
+// est donc fait par le programme, pas confie a la consigne.
+
+const DOCUMENT_MINIMAL = {
+  intro: "x",
+  conclusion: ["y"],
+  points_attention: [],
+  synthese: [],
+  services: [],
+  actions: [],
+  donnees_manquantes: [],
+};
+
+const FAITS = {
+  retards: [
+    { nom: "Mme ADANA ASTHORIE", justifie: false },
+    { nom: "NGA ISABELLE", justifie: true },
+  ],
+  absences_non_justifiees: [
+    { nom: "Mme ETOUNA MARIE SHARONE" },
+    { nom: "SOH ROMUALD" },
+  ],
+};
+
+function omis(ponctualite) {
+  const erreur = valider({ ...DOCUMENT_MINIMAL, ponctualite }, "QUOTIDIEN", FAITS)
+    .find((e) => e.startsWith("ponctualite : nom"));
+
+  return erreur ? erreur.split(" - ")[1].split(", ").length : 0;
+}
+
+verifier("un rapport citant tout le monde passe", () => {
+  assert.strictEqual(
+    omis(
+      "Retard de Mme ADANA ASTHORIE. Absences : Mme ETOUNA MARIE SHARONE " +
+      "et SOH ROMUALD."
+    ),
+    0
+  );
+});
+
+verifier("un absent oublie est signale", () => {
+  assert.strictEqual(
+    omis("Retard de Mme ADANA ASTHORIE. Absence : Mme ETOUNA MARIE SHARONE."),
+    1
+  );
+});
+
+verifier("un nom ecrit dans un autre ordre reste reconnu", () => {
+  assert.strictEqual(
+    omis(
+      "Retard de Mme ASTHORIE ADANA. Absences : Mme MARIE SHARONE ETOUNA, " +
+      "SOH ROMUALD."
+    ),
+    0,
+    "la fiche et le registre n'ordonnent pas les noms pareil"
+  );
+});
+
+verifier("ni la casse ni les accents ne font echouer la verification", () => {
+  assert.strictEqual(
+    omis(
+      "retard de mme adana asthorie ; absences : mme etouna marie sharone, " +
+      "soh romuald"
+    ),
+    0
+  );
+});
+
+verifier("un resume sans aucun nom est refuse", () => {
+  assert.strictEqual(
+    omis("Un retard et deux absences ont ete constates."),
+    3,
+    "les trois personnes concernees doivent etre nommees"
+  );
+});
+
+verifier("un retard justifie n'a pas a etre cite", () => {
+  assert.strictEqual(
+    omis("Mme ADANA ASTHORIE, Mme ETOUNA MARIE SHARONE, SOH ROMUALD."),
+    0,
+    "NGA ISABELLE est justifiee : son absence du texte est normale"
+  );
+});
+
+
+// --- Reponse du modele encadree de markdown ---------------------------------
+
+verifier("un JSON encadre de markdown reste lisible", () => {
+  assert.strictEqual(sansCloture('\u0060\u0060\u0060json\n{"a":1}\n\u0060\u0060\u0060'), '{"a":1}');
+  assert.strictEqual(sansCloture('\u0060\u0060\u0060\r\n{"a":1}\r\n\u0060\u0060\u0060'), '{"a":1}');
+  assert.strictEqual(sansCloture('  {"a":1}  '), '{"a":1}');
 });
 
 console.log(`${reussis} verifications passees.`);
