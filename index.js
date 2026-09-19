@@ -66,6 +66,7 @@ function parsePostContent(content) {
   const result = {
     text: [],
     images: [],
+    files: [],
     links: [],
   };
 
@@ -79,6 +80,17 @@ function parsePostContent(content) {
 
       if (item.tag === "img" && item.image_key) {
         result.images.push(item.image_key);
+      }
+
+      // Un document joint a un message redige -- le cas normal quand on
+      // ecrit "voici le planning" ET qu'on attache le PDF -- arrive sous
+      // cette balise. Elle etait ignoree : le texte etait enregistre, le
+      // fichier disparaissait sans un mot.
+      if ((item.tag === "file" || item.tag === "media") && item.file_key) {
+        result.files.push({
+          file_key: item.file_key,
+          file_name: item.file_name || `${item.file_key}.bin`,
+        });
       }
 
       if (item.tag === "a" && item.href) {
@@ -555,8 +567,36 @@ async function handleMessage(data) {
                 file_key: imageKey,
                 file_path: imagePath,
             });
-            
+
+            // Sans cette ligne, une photo de fiche envoyee avec un
+            // commentaire n'etait jamais soumise a la lecture : elle
+            // finissait dans le groupe et nulle part ailleurs.
+            fichiersRecus.push(imagePath);
+
             await relayerImage(imagePath);
+            }
+
+        for (const fichier of post.files) {
+            const filePath = await downloadResource(
+                message.message_id,
+                fichier.file_key,
+                "file",
+                fichier.file_name
+            );
+
+            saveAttachment({
+                message_id: message.message_id,
+                attachment_type: "file",
+                file_name: fichier.file_name,
+                file_key: fichier.file_key,
+                file_path: filePath,
+            });
+
+            fichiersRecus.push(filePath);
+
+            await relayerFichier(filePath, fichier.file_name);
+
+            console.log("✓ Fichier du message riche enregistré :", fichier.file_name);
             }
 
         }
