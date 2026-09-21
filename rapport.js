@@ -1069,9 +1069,13 @@ async function construireHebdomadaire(debut) {
   const jours = joursDeLaSemaine(debut);
   const fin = jours[jours.length - 1];
 
-  // La fenetre de la derniere journee court jusqu'au lendemain 17h ; on
-  // ajoute la suivante pour rattraper ce qui arrive encore apres.
-  const fenetres = [...jours, veille(fin, -1)];
+  // On balaye une fenetre de part et d'autre de la periode. Apres, pour ce
+  // qui arrive en retard. Avant, parce qu'un compte rendu mal nomme peut
+  // tomber dans la fenetre precedente : le 14 septembre a 11h36, le Call
+  // Center a depose un fichier intitule "15:09:2026" dans la fenetre du 13.
+  // La datation ne gardera de toute facon que ce qui annonce un jour de la
+  // semaine, ces deux fenetres supplementaires ne polluent donc rien.
+  const fenetres = [veille(debut, 1), ...jours, veille(fin, -1)];
 
   const parJour = {};
   const bilansDeServices = [];
