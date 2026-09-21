@@ -987,6 +987,15 @@ Periode couverte : du ${enFrancais(debut, true)} au ${enFrancais(fin, true)}.
 Ce n'est pas une juxtaposition de sept journees. La Direction Generale attend
 une lecture d'ensemble : ce qui progresse, ce qui stagne, ce qui se repete.
 
+DEUX SOURCES TE SONT FOURNIES
+Les JOURNEES DE LA PERIODE portent les comptes rendus quotidiens, deja ranges
+sous la journee qu'ils couvrent, et les donnees de ponctualite calculees.
+Les BILANS HEBDOMADAIRES TRANSMIS PAR LES SERVICES, quand il y en a, sont les
+syntheses que les services redigent eux-memes pour la semaine ecoulee. Ils
+donnent la vue d'ensemble d'un service ; les journees donnent le detail date.
+Croise les deux : un chiffre du bilan hebdomadaire qui se retrouve dans une
+journee se range dans le tableau a cette date.
+
 CHAMPS
 intro : une phrase situant la periode et les services ayant transmis.
 axes : trois a cinq lignes de synthese executive, une par grand domaine
@@ -1042,43 +1051,123 @@ function joursDeLaSemaine(debut) {
 }
 
 
+// Les comptes rendus arrivent en retard, parfois de plusieurs jours : le
+// 21 septembre au matin, le SAV a depose d'un coup ses rapports du 18 et du
+// 19. Ranger chaque piece dans la journee de sa FENETRE D'ARRIVEE les aurait
+// tous jetes, chacun ne correspondant pas au jour ou il tombait.
+//
+// Pour la semaine, on procede donc autrement que pour une journee : on lit
+// tout ce qui est arrive sur la periode, on date chaque piece une fois, puis
+// on la classe sous la journee qu'elle ANNONCE. Une piece du 18 arrivee le 21
+// retrouve ainsi sa place.
+//
+// Les bilans hebdomadaires des services -- ceux que TIAKO et MESSOA
+// transmettent le lundi pour la semaine ecoulee -- couvrent une periode et
+// non un jour. Ils etaient ecartes du rapport journalier a juste titre ; ici
+// ils sont au contraire la matiere premiere.
 async function construireHebdomadaire(debut) {
   const jours = joursDeLaSemaine(debut);
   const fin = jours[jours.length - 1];
 
-  const journees = [];
+  // La fenetre de la derniere journee court jusqu'au lendemain 17h ; on
+  // ajoute la suivante pour rattraper ce qui arrive encore apres.
+  const fenetres = [...jours, veille(fin, -1)];
+
+  const parJour = {};
+  const bilansDeServices = [];
+  const horsSemaine = [];
   const ignorees = [];
   let coutPieces = 0;
 
-  for (const jour of jours) {
-    const batch = prepareDailyBatch(jour);
-    const ponctualite = faitsDePonctualite(jour);
+  for (const fenetre of fenetres) {
+    const batch = prepareDailyBatch(fenetre);
 
-    if (batch.total_messages === 0 && !ponctualite.fiche_recue) {
+    if (!batch.total_messages) {
       continue;
     }
 
-    const pieces = await lirePiecesJointes(batch);
-    const tri = await trierParJournee(pieces.lues, jour);
+    const lecture = await lirePiecesJointes(batch);
 
-    coutPieces += pieces.cout;
-    ignorees.push(...pieces.ignorees.map((p) => `${jour} : ${p}`));
+    coutPieces += lecture.cout;
+    ignorees.push(...lecture.ignorees.map((p) => `${fenetre} : ${p}`));
 
-    journees.push({
-      date: jour,
-      ponctualite: ponctualiteSoumise(ponctualite),
-      messages: batch.messages.map((m) => ({ heure: m.timestamp, texte: m.text })),
-      pieces: tri.retenues,
-    });
+    if (jours.includes(fenetre)) {
+      const textes = batch.messages
+        .map((m) => ({ heure: m.timestamp, texte: m.text }))
+        .filter((m) => m.texte);
+
+      if (textes.length) {
+        (parJour[fenetre] ||= { messages: [], pieces: [] }).messages.push(...textes);
+      }
+    }
+
+    for (const piece of lecture.lues) {
+      let journee = null;
+
+      try {
+        journee = await journeeDuComptRendu(piece, fenetre);
+      } catch (erreur) {
+        console.warn(`[rapport] datation de ${piece.nom} impossible : ${erreur.message}`);
+      }
+
+      if (journee?.periode) {
+        console.log(`[rapport]   bilan de service : ${piece.nom} (${journee.indice})`);
+        bilansDeServices.push({ nom: piece.nom, texte: piece.texte });
+        continue;
+      }
+
+      // Sans date lisible, la piece revient a la journee de sa fenetre.
+      const cible = journee?.date || fenetre;
+
+      if (!jours.includes(cible)) {
+        horsSemaine.push({ nom: piece.nom, journee: cible });
+
+        console.warn(
+          `[rapport]   hors semaine : ${piece.nom} porte sur le ${cible}`
+        );
+
+        continue;
+      }
+
+      if (journee?.date && journee.date !== fenetre) {
+        console.log(
+          `[rapport]   rattachee au ${cible} : ${piece.nom} (arrivee dans la fenetre du ${fenetre})`
+        );
+      }
+
+      (parJour[cible] ||= { messages: [], pieces: [] }).pieces.push(piece);
+    }
   }
 
-  if (!journees.length) {
+  const journees = jours
+    .map((jour) => {
+      const ponctualite = faitsDePonctualite(jour);
+      const contenu = parJour[jour];
+
+      if (!contenu && !ponctualite.fiche_recue) {
+        return null;
+      }
+
+      return {
+        date: jour,
+        ponctualite: ponctualiteSoumise(ponctualite),
+        messages: contenu?.messages || [],
+        pieces: contenu?.pieces || [],
+      };
+    })
+    .filter(Boolean);
+
+  if (!journees.length && !bilansDeServices.length) {
     return { statut: "vide", date: debut, fin };
   }
 
   const contexte =
     `${consigneHebdomadaire(debut, fin)}\n\n` +
-    `JOURNEES DE LA PERIODE :\n${JSON.stringify(journees)}`;
+    `JOURNEES DE LA PERIODE :\n${JSON.stringify(journees)}` +
+    (bilansDeServices.length
+      ? `\n\nBILANS HEBDOMADAIRES TRANSMIS PAR LES SERVICES :\n` +
+        `${JSON.stringify(bilansDeServices)}`
+      : "");
 
   let { donnees, usage, modele } = await produireJson(
     contexte, SCHEMA_HEBDOMADAIRE, "HEBDOMADAIRE"
@@ -1104,7 +1193,12 @@ async function construireHebdomadaire(debut) {
   return {
     statut: erreurs.length ? "defauts" : "ok",
     erreurs,
-    pieces_ignorees: ignorees,
+    pieces_ignorees: [
+      ...ignorees,
+      ...horsSemaine.map(
+        (p) => `${p.nom} porte sur le ${p.journee}, hors de la semaine`
+      ),
+    ],
     cout_pieces: coutPieces,
     usage,
     modele,
