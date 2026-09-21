@@ -640,6 +640,61 @@ const SCHEMA_JOURNEE = {
   required: ["date", "indice", "periode"],
 };
 
+const MOIS_MOTIF =
+  "janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre";
+
+function sansSignes(valeur) {
+  return String(valeur || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+}
+
+// Les dates completes citees dans l'indice, au format ISO. "18 septembre
+// 2026" et "18/09/2026" comptent ; "14" tout seul, dans "du 14 au 19", n'est
+// pas une date complete et n'est pas compte -- c'est surPlusieursJours qui
+// reconnait cette forme.
+function datesDeLIndice(indice) {
+  const texte = sansSignes(indice);
+  const trouvees = [];
+
+  const ajouter = (a, m, j) => {
+    const iso = `${a}-${String(m).padStart(2, "0")}-${String(j).padStart(2, "0")}`;
+
+    if (m >= 1 && m <= 12 && j >= 1 && j <= 31 && !trouvees.includes(iso)) {
+      trouvees.push(iso);
+    }
+  };
+
+  for (const t of texte.matchAll(
+    new RegExp(`(\\d{1,2})\\s+(${MOIS_MOTIF})\\s+(\\d{4})`, "g")
+  )) {
+    ajouter(Number(t[3]), MOIS_MOTIF.split("|").indexOf(t[2]) + 1, Number(t[1]));
+  }
+
+  for (const t of texte.matchAll(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/g)) {
+    const annee = Number(t[3]);
+
+    ajouter(annee < 100 ? 2000 + annee : annee, Number(t[2]), Number(t[1]));
+  }
+
+  return trouvees;
+}
+
+// "du 14 au 19 septembre", "DU 14 AU 19/09/2026", "semaine du 08 au 14" :
+// deux quantiemes relies par "au" suffisent, meme si une seule date complete
+// figure dans la mention.
+function surPlusieursJours(indice, dates) {
+  const texte = sansSignes(indice);
+
+  return (
+    dates.length >= 2 ||
+    /\bdu\b[\s\S]{0,60}\bau\b/.test(texte) ||
+    /\d{1,2}\s*(?:au|a|-|–)\s*\d{1,2}/.test(texte)
+  );
+}
+
+
 async function journeeDuComptRendu(piece, dateAttendue) {
   const { donnees } = await genererJson({
     tache: "ROUTAGE",
@@ -674,12 +729,35 @@ async function journeeDuComptRendu(piece, dateAttendue) {
   // Le modele repond volontiers la CHAINE "null" plutot que rien. Sans ce
   // filtre, elle serait comparee a la date du rapport, ne correspondrait pas,
   // et ferait ecarter une piece dont on ignore simplement la date.
-  const date = String(donnees?.date || "").trim();
+  const brut = String(donnees?.date || "").trim();
+  const indice = donnees?.indice || "";
+
+  // L'indice est le passage recopie du document. Il est bien plus fiable que
+  // les deux autres champs, que le modele remplit de travers :
+  //
+  //   RAPPORT DU 18 09 26.pdf   date: null   indice: "Date : Vendredi 18
+  //     septembre 2026" -- il avait trouve la date et ne l'a pas reportee ;
+  //   rapport 14:09:2026.pdf    periode: true   indice: "Periode d'analyse :
+  //     Lundi 14 Septembre 2026" -- le mot "periode" l'a trompe, alors que la
+  //     mention ne nomme qu'un seul jour.
+  //
+  // On relit donc l'indice nous-memes.
+  const dates = datesDeLIndice(indice);
+
+  const periode = surPlusieursJours(indice, dates)
+    ? true
+    : dates.length === 1
+      ? false
+      : donnees?.periode === true;
 
   return {
-    date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
-    indice: donnees?.indice || "",
-    periode: donnees?.periode === true,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(brut)
+      ? brut
+      : dates.length === 1 && !periode
+        ? dates[0]
+        : null,
+    indice,
+    periode,
   };
 }
 
