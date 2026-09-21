@@ -158,17 +158,42 @@ function corpsTexteHebdomadaire(d) {
     );
   }
 
-  lignes.push("", "03 Points d'attention");
-
-  for (const pt of d.points_attention || []) {
-    lignes.push(`  • [${pt.priorite}] ${pt.intitule} — ${pt.constat}`);
+  if (d.lecture) {
+    lignes.push("", `  Lecture : ${d.lecture}`);
   }
+
+  let n = 3;
+  const titre = (libelle) => `${String(n++).padStart(2, "0")} ${libelle}`;
+
+  if ((d.chantiers_it || []).length) {
+    lignes.push("", titre("Service Informatique — consolidation"));
+
+    for (const c of d.chantiers_it) {
+      lignes.push(`  ${c.chantier} : ${c.avancement}`);
+      lignes.push(`    → ${c.suite}`);
+    }
+  }
+
+  if ((d.sav_rh || []).length) {
+    lignes.push("", titre("SAV et suivi RH"));
+
+    for (const v of d.sav_rh) {
+      lignes.push(`  ${v.volet} : ${v.situation}`);
+      lignes.push(`    → ${v.suite}`);
+    }
+  }
+
+  lignes.push("", titre("Priorités de la semaine suivante"));
+
+  (d.priorites || []).forEach((p, i) => {
+    lignes.push(`  ${i + 1}. ${p.action}  [${p.responsable}]`);
+  });
 
   for (const manque of d.donnees_manquantes || []) {
     lignes.push(`  • ${manque}`);
   }
 
-  lignes.push("", "04 Conclusion");
+  lignes.push("", titre("Conclusion"));
 
   for (const para of d.conclusion || []) {
     lignes.push(`  ${para}`);

@@ -296,9 +296,55 @@ function valider(d, type, ponctualite = null) {
 
   if (type === "HEBDOMADAIRE") {
     if (!(d.axes || []).length) erreurs.push("aucun axe");
+
     for (const a of d.axes || []) {
       if (vide(a.axe) || vide(a.constat)) erreurs.push("axe incomplet");
+      if (vide(a.vigilance)) erreurs.push(`axe sans suite : ${a.axe}`);
     }
+
+    if (!(d.indicateurs || []).length) erreurs.push("aucun indicateur");
+
+    for (const i of d.indicateurs || []) {
+      if (vide(i.date)) erreurs.push("indicateur sans date");
+    }
+
+    for (const c of d.chantiers_it || []) {
+      if (vide(c.chantier) || vide(c.avancement)) erreurs.push("chantier incomplet");
+    }
+
+    for (const v of d.sav_rh || []) {
+      if (vide(v.volet) || vide(v.situation)) erreurs.push("volet SAV/RH incomplet");
+    }
+
+    for (const p of d.priorites || []) {
+      if (vide(p.action) || vide(p.responsable)) erreurs.push("priorite incomplete");
+    }
+
+    // Le defaut observe le 21 septembre : un tableau entierement en tirets
+    // sous une synthese citant 320 appels et 207 contacts a relancer. Les
+    // chiffres etaient dans les comptes rendus, le modele ne les avait pas
+    // ventiles. C'est verifiable sans le relire.
+    const cellules = (d.indicateurs || []).flatMap((i) => [
+      i.showroom, i.proformas_ventes, i.call_center, i.relances,
+    ]);
+
+    const renseignees = cellules.filter(
+      (c) => /\d/.test(String(c || ""))
+    ).length;
+
+    const chiffresAilleurs = (d.axes || [])
+      .map((a) => `${a.constat} ${a.vigilance}`)
+      .concat(d.conclusion || [], d.lecture || "")
+      .join(" ");
+
+    if (!renseignees && /\d/.test(chiffresAilleurs)) {
+      erreurs.push(
+        "tableau d'indicateurs vide alors que la synthese cite des chiffres"
+      );
+    }
+
+    if (!(d.conclusion || []).length) erreurs.push("conclusion vide");
+
     return erreurs;
   }
 
@@ -864,18 +910,15 @@ const SCHEMA_HEBDOMADAIRE = {
   type: "object",
   properties: {
     intro: { type: "string" },
-    axes: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          axe: { type: "string" },
-          constat: { type: "string" },
-          vigilance: { type: "string" },
-        },
-        required: ["axe", "constat", "vigilance"],
+    axes: { type: "array", items: {
+      type: "object",
+      properties: {
+        axe: { type: "string" },
+        constat: { type: "string" },
+        vigilance: { type: "string" },
       },
-    },
+      required: ["axe", "constat", "vigilance"],
+    } },
     indicateurs: {
       type: "array",
       items: {
@@ -890,24 +933,42 @@ const SCHEMA_HEBDOMADAIRE = {
         required: ["date", "showroom", "proformas_ventes", "call_center", "relances"],
       },
     },
-    points_attention: {
+    lecture: { type: "string" },
+    chantiers_it: { type: "array", items: {
+      type: "object",
+      properties: {
+        chantier: { type: "string" },
+        avancement: { type: "string" },
+        suite: { type: "string" },
+      },
+      required: ["chantier", "avancement", "suite"],
+    } },
+    sav_rh: { type: "array", items: {
+      type: "object",
+      properties: {
+        volet: { type: "string" },
+        situation: { type: "string" },
+        suite: { type: "string" },
+      },
+      required: ["volet", "situation", "suite"],
+    } },
+    priorites: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          priorite: { type: "string", enum: ["HAUTE", "MOYENNE", "BASSE"] },
-          intitule: { type: "string" },
-          constat: { type: "string" },
+          action: { type: "string" },
+          responsable: { type: "string" },
         },
-        required: ["priorite", "intitule", "constat"],
+        required: ["action", "responsable"],
       },
     },
     conclusion: { type: "array", items: { type: "string" } },
     donnees_manquantes: { type: "array", items: { type: "string" } },
   },
   required: [
-    "intro", "axes", "indicateurs", "points_attention",
-    "conclusion", "donnees_manquantes",
+    "intro", "axes", "indicateurs", "lecture", "chantiers_it", "sav_rh",
+    "priorites", "conclusion", "donnees_manquantes",
   ],
 };
 
@@ -929,19 +990,37 @@ une lecture d'ensemble : ce qui progresse, ce qui stagne, ce qui se repete.
 CHAMPS
 intro : une phrase situant la periode et les services ayant transmis.
 axes : trois a cinq lignes de synthese executive, une par grand domaine
-  reellement documente -- activite commerciale, service apres-vente, systemes
-  d'information, ressources humaines. axe porte le domaine, constat ce qui
-  s'est passe sur la semaine avec les chiffres cumules quand ils existent,
-  vigilance le point a surveiller ou la suite attendue. N'ouvre pas un axe
-  pour un domaine dont rien n'a ete transmis.
-indicateurs : une ligne par JOURNEE de la periode ou quelque chose a ete
-  transmis, dans l'ordre chronologique. date au format JJ/MM. Les autres
-  colonnes portent les chiffres du jour, ou un tiret quand la donnee manque.
-  N'invente aucun chiffre pour remplir une case.
-points_attention : priorite HAUTE, MOYENNE ou BASSE. Ce qui revient plusieurs
-  jours de suite merite une priorite plus haute qu'un incident isole.
+  reellement documente -- Commercial / Showroom, Call Center, Service IT, SAV,
+  RH. axe porte le domaine, constat ce qui s'est passe sur la semaine AVEC LES
+  CHIFFRES DATES, vigilance le point a surveiller ou la suite attendue.
+  N'ouvre pas un axe pour un domaine dont rien n'a ete transmis.
+indicateurs : LE TABLEAU EST LA PREMIERE CHOSE QUE LIT LA DIRECTION GENERALE.
+  Une ligne par journee documentee, dans l'ordre chronologique, date au format
+  JJ/MM. Deux journees peuvent etre reunies sur une ligne, "18-19/09", quand
+  leurs chiffres arrivent ensemble.
+  CHAQUE CHIFFRE QUE TU CITES DANS UN AXE DOIT SE RETROUVER ICI, a sa date.
+  Un tableau de tirets sous une synthese pleine de chiffres est un defaut
+  grave : cela veut dire que tu as lu les comptes rendus sans les ventiler.
+  showroom : visites, prospects qualifies, essais.
+  proformas_ventes : au format "proformas / ventes", par exemple "1 / 0".
+  call_center : appels, messages, nouveaux prospects, rendez-vous.
+  relances : injoignables, nous revient, pas interesses, anomalies.
+  Le tiret ne s'emploie que pour une donnee reellement absente du compte
+  rendu de cette journee.
+lecture : un ou deux phrases sous le tableau, disant ce que les chiffres
+  racontent -- ou se situe l'ecart, quels modeles reviennent.
+chantiers_it : une ligne par chantier du Service Informatique reellement
+  documente. chantier le sujet, avancement ce qui a ete fait, suite l'etape
+  attendue. Liste vide si le service n'a rien transmis.
+sav_rh : une ligne par volet du Service Apres-Vente et des Ressources
+  Humaines : dossiers clients, livraisons, digitalisation, ponctualite.
+  volet le sujet, situation le consolide de la semaine, suite l'etape
+  attendue. Liste vide si rien n'a ete transmis.
+priorites : trois a six actions pour la semaine suivante, chacune avec son
+  responsable -- Commercial, Call Center, IT, SAV, RH. Elles decoulent des
+  points de vigilance des axes.
 conclusion : deux a quatre paragraphes. Volume d'activite de la semaine, ce
-  qui a ete concretise, ce qui reste en suspens pour la semaine suivante.
+  qui a ete concretise, ce qui reste en suspens.
 donnees_manquantes : une phrase complete par journee ou par service dont le
   compte rendu n'est pas parvenu. Liste vide si tout est la.
 

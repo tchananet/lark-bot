@@ -242,21 +242,60 @@ function corpsHebdomadaire(d) {
         i.date, i.showroom, i.proformas_ventes, i.call_center, i.relances,
       ]),
       [0.1, 0.22, 0.16, 0.28, 0.24]
-    ),
-    paragraphe("", { apres: 240 }),
-
-    titreSection("Points d'attention")
+    )
   );
 
-  for (const p of d.points_attention) {
-    ajouter(paragraphe(`• [${p.priorite}] ${p.intitule} — ${p.constat}`));
+  // La ligne de lecture sous le tableau : ce que les chiffres racontent.
+  if (d.lecture) {
+    ajouter(paragraphe(`Lecture : ${d.lecture}`, { apres: 240 }));
+  } else {
+    ajouter(paragraphe("", { apres: 240 }));
   }
 
+  if ((d.chantiers_it || []).length) {
+    ajouter(
+      titreSection("Service Informatique — consolidation"),
+      tableau(
+        ["Chantier", "Avancement", "Suite"],
+        d.chantiers_it.map((c) => [c.chantier, c.avancement, c.suite]),
+        [0.24, 0.44, 0.32]
+      ),
+      paragraphe("", { apres: 240 })
+    );
+  }
+
+  if ((d.sav_rh || []).length) {
+    ajouter(
+      titreSection("SAV et suivi RH"),
+      tableau(
+        ["Volet", "Situation consolidée", "Suite"],
+        d.sav_rh.map((s) => [s.volet, s.situation, s.suite]),
+        [0.18, 0.5, 0.32]
+      ),
+      paragraphe("", { apres: 240 })
+    );
+  }
+
+  ajouter(titreSection("Priorités de la semaine suivante"));
+
+  if ((d.priorites || []).length) {
+    ajouter(
+      tableau(
+        ["N°", "Action", "Responsable"],
+        d.priorites.map((p, i) => [String(i + 1), p.action, p.responsable]),
+        [0.07, 0.68, 0.25]
+      )
+    );
+  } else {
+    ajouter(paragraphe("Aucune priorité particulière retenue pour la semaine suivante."));
+  }
+
+  // Ce qui n'est pas arrive est dit, jamais comble.
   for (const manque of d.donnees_manquantes || []) {
     ajouter(paragraphe(`• ${manque}`, { italique: true, couleur: "595959" }));
   }
 
-  ajouter(paragraphe("", { apres: 160 }), titreSection("Conclusion"));
+  ajouter(paragraphe("", { apres: 240 }), titreSection("Conclusion"));
 
   for (const para of d.conclusion) {
     ajouter(paragraphe(para));
@@ -273,6 +312,7 @@ function corpsHebdomadaire(d) {
 
   return bloc.join("");
 }
+
 
 
 // ---------------------------------------------------------------------------
