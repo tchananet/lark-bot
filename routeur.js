@@ -73,6 +73,7 @@ const SCHEMA = {
       required: ["action", "personne"],
     },
     rapport_date: { type: "string" },
+    rapport_portee: { type: "string", enum: ["JOURNEE", "SEMAINE", ""] },
   },
   required: [
     "intention",
@@ -82,6 +83,7 @@ const SCHEMA = {
     "corrections",
     "acces",
     "rapport_date",
+    "rapport_portee",
   ],
 };
 
@@ -144,9 +146,13 @@ acces : uniquement pour GESTION_ACCES.
     enumerer les personnes habilitees. AUCUNE sinon.
   personne : le nom cite, recopie tel quel. Chaine vide pour LISTER.
   Pour toute autre intention, action vaut AUCUNE et personne une chaine vide.
-rapport_date : la journee demandee, au format AAAA-MM-JJ, uniquement pour
-  DEMANDE_RAPPORT. Chaine vide si aucune date n'est precisee ou si
-  l'intention est autre.
+rapport_portee : uniquement pour DEMANDE_RAPPORT. SEMAINE si le message
+  demande un bilan portant sur une semaine entiere -- "la semaine derniere",
+  "le rapport hebdomadaire", "du 14 au 20". JOURNEE pour une seule journee.
+  Chaine vide pour toute autre intention.
+rapport_date : uniquement pour DEMANDE_RAPPORT, au format AAAA-MM-JJ. Pour
+  une JOURNEE, la journee demandee. Pour une SEMAINE, le LUNDI de la semaine
+  demandee. Chaine vide si rien n'est precise ou si l'intention est autre.
 
 REGLES
 - Ne devine pas une intention a partir du nom du fichier : lis son contenu.
@@ -188,6 +194,11 @@ async function analyser({ texte = "", fichiers = [] } = {}) {
     rapport_date: /^\d{4}-\d{2}-\d{2}$/.test(analyse.rapport_date || "")
       ? analyse.rapport_date
       : null,
+
+    // Par defaut une journee : c'est la demande courante, et se tromper vers
+    // le rapport du jour coute moins cher qu'une semaine entiere produite
+    // pour rien.
+    rapport_portee: analyse.rapport_portee === "SEMAINE" ? "SEMAINE" : "JOURNEE",
   };
 }
 

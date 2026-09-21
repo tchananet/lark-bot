@@ -811,6 +811,223 @@ function nomFichier(document, date) {
 }
 
 
+// ---------------------------------------------------------------------------
+// Rapport hebdomadaire
+//
+// La semaine n'est pas la somme des journees : la Direction Generale attend
+// une lecture d'ensemble, pas sept rapports agrafes. On rassemble donc les
+// comptes rendus des sept journees, puis on demande au modele de degager des
+// AXES -- commercial, technique, ressources humaines -- et un tableau
+// d'indicateurs jour par jour.
+//
+// Les chiffres de ponctualite restent calcules : le modele n'en produit
+// aucun, il les met en phrases.
+// ---------------------------------------------------------------------------
+
+const SCHEMA_HEBDOMADAIRE = {
+  type: "object",
+  properties: {
+    intro: { type: "string" },
+    axes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          axe: { type: "string" },
+          constat: { type: "string" },
+          vigilance: { type: "string" },
+        },
+        required: ["axe", "constat", "vigilance"],
+      },
+    },
+    indicateurs: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          date: { type: "string" },
+          showroom: { type: "string" },
+          proformas_ventes: { type: "string" },
+          call_center: { type: "string" },
+          relances: { type: "string" },
+        },
+        required: ["date", "showroom", "proformas_ventes", "call_center", "relances"],
+      },
+    },
+    points_attention: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          priorite: { type: "string", enum: ["HAUTE", "MOYENNE", "BASSE"] },
+          intitule: { type: "string" },
+          constat: { type: "string" },
+        },
+        required: ["priorite", "intitule", "constat"],
+      },
+    },
+    conclusion: { type: "array", items: { type: "string" } },
+    donnees_manquantes: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "intro", "axes", "indicateurs", "points_attention",
+    "conclusion", "donnees_manquantes",
+  ],
+};
+
+
+function consigneHebdomadaire(debut, fin) {
+  return `Tu prepares le contenu du rapport HEBDOMADAIRE consolide des services
+d'ALPHA MOTORS Cameroun, etabli par la Direction des Ressources Humaines a
+l'attention de la Direction Generale.
+
+Tu ne produis PAS un document : tu produis les DONNEES du document, en JSON.
+L'en-tete, le numero d'ordre, la ville, la mise en page et la signature sont
+poses ensuite par le programme.
+
+Periode couverte : du ${enFrancais(debut, true)} au ${enFrancais(fin, true)}.
+
+Ce n'est pas une juxtaposition de sept journees. La Direction Generale attend
+une lecture d'ensemble : ce qui progresse, ce qui stagne, ce qui se repete.
+
+CHAMPS
+intro : une phrase situant la periode et les services ayant transmis.
+axes : trois a cinq lignes de synthese executive, une par grand domaine
+  reellement documente -- activite commerciale, service apres-vente, systemes
+  d'information, ressources humaines. axe porte le domaine, constat ce qui
+  s'est passe sur la semaine avec les chiffres cumules quand ils existent,
+  vigilance le point a surveiller ou la suite attendue. N'ouvre pas un axe
+  pour un domaine dont rien n'a ete transmis.
+indicateurs : une ligne par JOURNEE de la periode ou quelque chose a ete
+  transmis, dans l'ordre chronologique. date au format JJ/MM. Les autres
+  colonnes portent les chiffres du jour, ou un tiret quand la donnee manque.
+  N'invente aucun chiffre pour remplir une case.
+points_attention : priorite HAUTE, MOYENNE ou BASSE. Ce qui revient plusieurs
+  jours de suite merite une priorite plus haute qu'un incident isole.
+conclusion : deux a quatre paragraphes. Volume d'activite de la semaine, ce
+  qui a ete concretise, ce qui reste en suspens pour la semaine suivante.
+donnees_manquantes : une phrase complete par journee ou par service dont le
+  compte rendu n'est pas parvenu. Liste vide si tout est la.
+
+REGLES DE FOND
+- N'invente jamais un chiffre, un nom, un dossier ni une activite.
+- Les donnees de ponctualite te sont fournies DEJA CALCULEES : reprends-les
+  telles quelles, n'en deduis aucune autre et n'ajoute aucun nom absent.
+- Ne recopie jamais les intitules techniques des donnees fournies : tu
+  rediges un document, pas un export.
+- Francais administratif sobre, a la troisieme personne, correctement
+  accentue.
+- Texte brut : ni markdown, ni asterisques, ni dieses.`;
+}
+
+
+// veille(iso, -1) avance d'un jour : la semaine part du lundi fourni.
+function joursDeLaSemaine(debut) {
+  return Array.from({ length: 7 }, (_, i) => veille(debut, -i));
+}
+
+
+async function construireHebdomadaire(debut) {
+  const jours = joursDeLaSemaine(debut);
+  const fin = jours[jours.length - 1];
+
+  const journees = [];
+  const ignorees = [];
+  let coutPieces = 0;
+
+  for (const jour of jours) {
+    const batch = prepareDailyBatch(jour);
+    const ponctualite = faitsDePonctualite(jour);
+
+    if (batch.total_messages === 0 && !ponctualite.fiche_recue) {
+      continue;
+    }
+
+    const pieces = await lirePiecesJointes(batch);
+    const tri = await trierParJournee(pieces.lues, jour);
+
+    coutPieces += pieces.cout;
+    ignorees.push(...pieces.ignorees.map((p) => `${jour} : ${p}`));
+
+    journees.push({
+      date: jour,
+      ponctualite: ponctualiteSoumise(ponctualite),
+      messages: batch.messages.map((m) => ({ heure: m.timestamp, texte: m.text })),
+      pieces: tri.retenues,
+    });
+  }
+
+  if (!journees.length) {
+    return { statut: "vide", date: debut, fin };
+  }
+
+  const contexte =
+    `${consigneHebdomadaire(debut, fin)}\n\n` +
+    `JOURNEES DE LA PERIODE :\n${JSON.stringify(journees)}`;
+
+  let { donnees, usage, modele } = await produireJson(
+    contexte, SCHEMA_HEBDOMADAIRE, "HEBDOMADAIRE"
+  );
+
+  let erreurs = valider(donnees, "HEBDOMADAIRE");
+
+  if (erreurs.length) {
+    console.warn(`[rapport] validation echouee : ${erreurs.join(", ")}. Reprise.`);
+
+    const reprise = await produireJson(
+      contexte, SCHEMA_HEBDOMADAIRE, "HEBDOMADAIRE", { precedent: donnees, erreurs }
+    );
+
+    donnees = reprise.donnees;
+    usage = reprise.usage;
+    modele = reprise.modele;
+    erreurs = valider(donnees, "HEBDOMADAIRE");
+  }
+
+  const numero = allocateReportNumber(debut);
+
+  return {
+    statut: erreurs.length ? "defauts" : "ok",
+    erreurs,
+    pieces_ignorees: ignorees,
+    cout_pieces: coutPieces,
+    usage,
+    modele,
+    date: debut,
+    fin,
+    journees_couvertes: journees.map((j) => j.date),
+    document: {
+      type: "HEBDOMADAIRE",
+      numero: `N° ${String(numero).padStart(3, "0")} / ${SIGLE} / ${REFERENCE_HEBDO}`,
+      ville: VILLE,
+      date_redaction: enFrancais(localToday()),
+      titre_periode:
+        `SEMAINE DU ${enFrancais(debut).toUpperCase()} AU ${enFrancais(fin).toUpperCase()}`,
+      signature: SIGNATURE,
+      ...donnees,
+      donnees_manquantes: [
+        ...(donnees.donnees_manquantes || []),
+        ...ignorees.map((p) => `Piece jointe non lue par le programme : ${p}`),
+      ],
+    },
+  };
+}
+
+
+async function produireHebdomadaire(debut, dossier = ".") {
+  const resultat = await construireHebdomadaire(debut);
+
+  if (resultat.statut === "vide") {
+    return resultat;
+  }
+
+  const chemin = `${dossier}/${nomFichier(resultat.document, debut)}`;
+  ecrire(resultat.document, chemin);
+
+  return { ...resultat, chemin };
+}
+
+
 async function produireQuotidien(date, dossier = ".") {
   const resultat = await construireQuotidien(date);
 
@@ -826,6 +1043,10 @@ async function produireQuotidien(date, dossier = ".") {
 
 module.exports = {
   lirePiece,
+  construireHebdomadaire,
+  produireHebdomadaire,
+  joursDeLaSemaine,
+  SCHEMA_HEBDOMADAIRE,
   journeeDuComptRendu,
   trierParJournee,
   lirePiecesJointes,

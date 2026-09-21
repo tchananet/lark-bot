@@ -389,15 +389,42 @@ async function traiterAcces(acces, expediteur, repondre) {
 }
 
 
-async function traiterDemandeRapport(date, repondre) {
-  const cible = date || localReportDate();
+// Le lundi de la semaine qui contient cette date. Une demande portant sur
+// "la semaine derniere" arrive avec une date quelconque de cette semaine :
+// le rapport, lui, part toujours du lundi.
+function lundiDeLaSemaine(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const jour = d.getUTCDay();
 
-  await repondre(`Génération du rapport du ${cible} en cours...`);
+  d.setUTCDate(d.getUTCDate() - (jour === 0 ? 6 : jour - 1));
 
-  const resultat = await publierRapport({ date: cible });
+  return d.toISOString().slice(0, 10);
+}
+
+
+async function traiterDemandeRapport(date, repondre, portee = "JOURNEE") {
+  const hebdomadaire = portee === "SEMAINE";
+
+  const cible = hebdomadaire
+    ? lundiDeLaSemaine(date || localReportDate())
+    : date || localReportDate();
+
+  await repondre(
+    hebdomadaire
+      ? `Génération du rapport hebdomadaire de la semaine du ${cible} en cours. ` +
+        `Sept journées à relire, comptez quelques minutes.`
+      : `Génération du rapport du ${cible} en cours...`
+  );
+
+  const resultat = await publierRapport({ date: cible, portee });
 
   if (resultat.statut === "vide") {
-    await repondre(`Aucun compte rendu ni fiche de présence pour le ${cible}.`);
+    await repondre(
+      hebdomadaire
+        ? `Aucun compte rendu sur la semaine du ${cible}.`
+        : `Aucun compte rendu ni fiche de présence pour le ${cible}.`
+    );
+
     return;
   }
 
@@ -448,7 +475,11 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
       return analyse;
 
     case "DEMANDE_RAPPORT":
-      await traiterDemandeRapport(analyse.rapport_date, repondre);
+      await traiterDemandeRapport(
+        analyse.rapport_date,
+        repondre,
+        analyse.rapport_portee
+      );
       return analyse;
 
     case "RAPPORT":

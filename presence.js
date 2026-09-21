@@ -241,6 +241,25 @@ function faitsDePonctualite(date) {
     lendemain_de_permanence: l.de_soir_la_veille,
   });
 
+  // Sans fiche, tout le monde ressort ABSENT faute de pointage. Ce n'est pas
+  // une information, c'est un trou : annoncer vingt et une absences pour une
+  // journee dont on n'a rien recu serait un mensonge, et cela accusait des
+  // gens a tort. On ne rend alors aucune liste.
+  if (!aPointe) {
+    return {
+      date,
+      fiche_recue: false,
+      effectif_suivi: lignes.length,
+      compte,
+      retards: [],
+      absences_non_justifiees: [],
+      absences_justifiees: [],
+      missions: [],
+      a_distance: [],
+      signatures_manquantes: [],
+    };
+  }
+
   return {
     date,
     // Sans aucun pointage, la journee n'est pas "sans incident" : la fiche

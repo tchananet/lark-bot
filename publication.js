@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const Lark = require("@larksuiteoapi/node-sdk");
 
-const { produireQuotidien } = require("./rapport");
+const { produireQuotidien, produireHebdomadaire } = require("./rapport");
 const { localReportDate } = require("./database");
 
 // ---------------------------------------------------------------------------
@@ -67,6 +67,10 @@ async function envoyerFichier(chatId, chemin) {
 // deviendrait un exercice.
 function enTexte(d) {
   const lignes = [d.numero, "", `${d.ville}, le ${d.date_redaction}`, ""];
+
+  if (d.type === "HEBDOMADAIRE") {
+    return [...lignes, ...corpsTexteHebdomadaire(d)].join("\n");
+  }
 
   lignes.push(`RAPPORT JOURNALIER CONSOLIDÉ DES ACTIVITÉS – ${d.titre_date}`, "");
   lignes.push(d.intro, "");
@@ -131,10 +135,56 @@ function enTexte(d) {
 }
 
 
+function corpsTexteHebdomadaire(d) {
+  const lignes = [
+    `RAPPORT HEBDOMADAIRE CONSOLIDÉ DES SERVICES — ${d.titre_periode}`,
+    "",
+    d.intro,
+    "",
+    "01 Synthèse exécutive",
+  ];
+
+  for (const a of d.axes || []) {
+    lignes.push(`  ${a.axe} : ${a.constat}`);
+    lignes.push(`    → ${a.vigilance}`);
+  }
+
+  lignes.push("", "02 Indicateurs commerciaux consolidés");
+
+  for (const i of d.indicateurs || []) {
+    lignes.push(
+      `  ${i.date} | showroom ${i.showroom} | proformas/ventes ${i.proformas_ventes} ` +
+      `| call center ${i.call_center} | relances ${i.relances}`
+    );
+  }
+
+  lignes.push("", "03 Points d'attention");
+
+  for (const pt of d.points_attention || []) {
+    lignes.push(`  • [${pt.priorite}] ${pt.intitule} — ${pt.constat}`);
+  }
+
+  for (const manque of d.donnees_manquantes || []) {
+    lignes.push(`  • ${manque}`);
+  }
+
+  lignes.push("", "04 Conclusion");
+
+  for (const para of d.conclusion || []) {
+    lignes.push(`  ${para}`);
+  }
+
+  lignes.push("", d.signature, "");
+
+  return lignes;
+}
+
+
 async function publierRapport(options = {}) {
   const date = options.date || localReportDate();
   const chatId = options.chatId || process.env.LARK_REPORT_CHAT_ID;
   const essaiSeul = options.essaiSeul === true;
+  const hebdomadaire = options.portee === "SEMAINE";
 
   if (!chatId && !essaiSeul) {
     throw new Error("LARK_REPORT_CHAT_ID absent de l'environnement");
@@ -144,13 +194,24 @@ async function publierRapport(options = {}) {
     fs.mkdirSync(DOSSIER, { recursive: true });
   }
 
-  console.log(`[rapport] Preparation du rapport du ${date}`);
+  console.log(
+    hebdomadaire
+      ? `[rapport] Preparation du rapport hebdomadaire de la semaine du ${date}`
+      : `[rapport] Preparation du rapport du ${date}`
+  );
 
   try {
-    const resultat = await produireQuotidien(date, DOSSIER);
+    const resultat = hebdomadaire
+      ? await produireHebdomadaire(date, DOSSIER)
+      : await produireQuotidien(date, DOSSIER);
 
     if (resultat.statut === "vide") {
-      console.log("[rapport] Aucun compte rendu ni fiche de presence ce jour.");
+      console.log(
+        hebdomadaire
+          ? "[rapport] Aucun compte rendu sur toute la semaine."
+          : "[rapport] Aucun compte rendu ni fiche de presence ce jour."
+      );
+
       return { statut: "vide", date };
     }
 
@@ -190,7 +251,9 @@ async function publierRapport(options = {}) {
     await envoyerTexte(
       chatId,
       `${resultat.document.numero}\n` +
-      `Rapport journalier consolidé — ${resultat.document.titre_date}` +
+      (hebdomadaire
+        ? `Rapport hebdomadaire consolidé — ${resultat.document.titre_periode}`
+        : `Rapport journalier consolidé — ${resultat.document.titre_date}`) +
       (reserves.length ? `\n\nÀ vérifier : ${reserves.join(", ")}` : "")
     );
 
@@ -228,7 +291,11 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const date = args.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) || null;
 
-  publierRapport({ date, essaiSeul: args.includes("--essai") }).then((r) => {
+  publierRapport({
+    date,
+    essaiSeul: args.includes("--essai"),
+    portee: args.includes("--semaine") ? "SEMAINE" : "JOURNEE",
+  }).then((r) => {
     process.exitCode = r.statut === "erreur" ? 1 : 0;
   });
 }
