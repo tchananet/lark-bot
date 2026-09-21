@@ -218,6 +218,32 @@ function resoudreEmploye(nomBrut) {
     return { employe: candidats[0], methode: "JETONS" };
   }
 
+  // Filet inverse : le libelle recu contient TOUT le nom du registre, plus
+  // d'autres mots. C'est le cas des profils Lark, qui portent souvent l'etat
+  // civil complet -- "ALIMATOU-SADIA BOUBA SAMBO" pour "ALIMATOU SADIA" --
+  // la ou le registre ne garde que le nom usuel. Sans cela, la DRH ecrit au
+  // bot et n'est pas reconnue.
+  //
+  // On exige au moins deux mots cote registre : un nom d'un seul mot
+  // happerait n'importe quelle homonymie.
+  if (!candidats.length && recus.length > 1) {
+    const recusConnus = new Set(recus);
+
+    const inverses = db.prepare(`SELECT * FROM employees WHERE actif = 1`).all()
+      .filter((employe) => {
+        const mots = jetons(employe.nom_complet);
+        return mots.length > 1 && mots.every((mot) => recusConnus.has(mot));
+      });
+
+    if (inverses.length === 1) {
+      return { employe: inverses[0], methode: "JETONS_INVERSE" };
+    }
+
+    if (inverses.length > 1) {
+      return { employe: null, methode: "AMBIGU", candidats: inverses };
+    }
+  }
+
   return {
     employe: null,
     methode: candidats.length > 1 ? "AMBIGU" : "INCONNU",
