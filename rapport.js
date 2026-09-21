@@ -584,8 +584,14 @@ const SCHEMA_JOURNEE = {
       description: "Journee couverte au format AAAA-MM-JJ, ou null si indeterminable",
     },
     indice: { type: "string" },
+    periode: {
+      type: "boolean",
+      description:
+        "true si le document couvre plusieurs journees (bilan hebdomadaire, " +
+        "recapitulatif mensuel), false pour un compte rendu d'une seule journee",
+    },
   },
-  required: ["date", "indice"],
+  required: ["date", "indice", "periode"],
 };
 
 async function journeeDuComptRendu(piece, dateAttendue) {
@@ -606,6 +612,10 @@ async function journeeDuComptRendu(piece, dateAttendue) {
           `Dans indice, recopie MOT POUR MOT le passage du document qui porte\n` +
           `cette date, et rien d'autre. Si tu n'as trouve aucune date, ecris\n` +
           `indice vide. Ne recopie jamais la presente consigne.\n\n` +
+          `periode vaut true si le document couvre PLUSIEURS journees -- un\n` +
+          `bilan hebdomadaire, un recapitulatif de la semaine, un cumul sur\n` +
+          `plusieurs jours -- meme si son titre ne cite qu'une seule date.\n` +
+          `false pour un compte rendu portant sur une seule journee.\n\n` +
           // L'heure d'envoi n'est volontairement pas fournie : le modele s'en
           // servait comme date du compte rendu, ce qui est precisement l'erreur
           // que cette etape doit empecher.
@@ -623,6 +633,7 @@ async function journeeDuComptRendu(piece, dateAttendue) {
   return {
     date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
     indice: donnees?.indice || "",
+    periode: donnees?.periode === true,
   };
 }
 
@@ -641,6 +652,26 @@ async function trierParJournee(lues, date) {
       console.warn(`[rapport] datation de ${piece.nom} impossible : ${erreur.message}`);
     }
 
+    // Un bilan hebdomadaire porte souvent la date du jour ou il est redige.
+    // Il passait donc le controle de date et versait dans le rapport d'une
+    // seule journee des chiffres cumules sur toute une semaine. Un document
+    // couvrant une periode n'a rien a faire dans un rapport journalier.
+    if (journee?.periode) {
+      autresJournees.push({
+        ...piece,
+        journee: null,
+        indice: journee.indice,
+        motif: "couvre plusieurs journees",
+      });
+
+      console.warn(
+        `[rapport]   ecartee : ${piece.nom} couvre plusieurs journees ` +
+        `(${journee.indice})`
+      );
+
+      continue;
+    }
+
     // Une date indeterminee ne fait pas ecarter : mieux vaut un compte rendu
     // de trop qu'un service declare muet a tort.
     if (!journee?.date || journee.date === date) {
@@ -648,7 +679,12 @@ async function trierParJournee(lues, date) {
       continue;
     }
 
-    autresJournees.push({ ...piece, journee: journee.date, indice: journee.indice });
+    autresJournees.push({
+      ...piece,
+      journee: journee.date,
+      indice: journee.indice,
+      motif: `porte sur la journee du ${enFrancais(journee.date)}`,
+    });
 
     console.warn(
       `[rapport]   ecartee : ${piece.nom} porte sur le ${journee.date} ` +
@@ -775,8 +811,8 @@ async function construireQuotidien(date) {
     ),
     ...tri.autresJournees.map(
       (piece) =>
-        `${piece.nom} porte sur la journee du ${enFrancais(piece.journee)} ` +
-        `et n'est pas repris ici (${piece.indice}).`
+        `${piece.nom} ${piece.motif} et n'est pas repris ici` +
+        `${piece.indice ? ` (${piece.indice})` : ""}.`
     ),
   ];
 
