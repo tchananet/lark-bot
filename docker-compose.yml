@@ -21,6 +21,12 @@ services:
       # Mistral n est garde que pour l OCR des fiches manuscrites.
       MISTRAL_API: ${MISTRAL_API}
 
+      # Troisieme moteur de lecture. Le 23 septembre, Mistral et OpenRouter
+      # ont refuse en meme temps et six comptes rendus ont ete perdus : un
+      # fournisseur de plus, sur un palier gratuit, evite que deux quotas
+      # epuises suffisent a effacer une journee.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
       # Identifiant Lark de la DRH. Sans lui, la reconnaissance retombe sur
       # le libelle du profil, qui peut etre maquille.
       LARK_RH_OPEN_ID: ${LARK_RH_OPEN_ID:-}

@@ -62,6 +62,41 @@ async function downloadResource(messageId, fileKey, type, fileName) {
 }
 
 
+// Lire le document tout de suite, sans attendre le rapport.
+//
+// Un compte rendu arrive le lundi n'etait lu que le mardi, au moment du
+// rapport. Le 23 septembre, les fournisseurs etaient indisponibles a ce
+// moment precis et six comptes rendus sont ressortis "lecture impossible",
+// alors que les PDF dormaient sur le disque depuis la veille.
+//
+// Lire a l'arrivee donne une seconde chance -- deux moments distincts au lieu
+// d'un seul -- et le texte, une fois obtenu, est garde pour toujours. Un
+// echec ici n'a aucune consequence : le rapport reessaiera.
+async function lireDesMaintenant(fichiers) {
+  const { lirePiece } = require("./rapport");
+
+  for (const chemin of fichiers) {
+    if (!LARK_FILE_TYPES[path.extname(chemin).toLowerCase()] &&
+        !/\.(pdf|jpg|jpeg|png|webp|docx)$/i.test(chemin)) {
+      continue;
+    }
+
+    try {
+      const lecture = await lirePiece(chemin, path.basename(chemin));
+
+      console.log(
+        `✓ Document lu et memorise : ${path.basename(chemin)} ` +
+        `(${lecture.moteur}, ${lecture.texte.length} caracteres)`
+      );
+    } catch (erreur) {
+      console.warn(
+        `Lecture differee pour ${path.basename(chemin)} : ${erreur.message}`
+      );
+    }
+  }
+}
+
+
 function parsePostContent(content) {
   const result = {
     text: [],
@@ -685,6 +720,8 @@ async function handleMessage(data) {
         duree_ms: Date.now() - debutTraitement,
       });
     }
+
+    await lireDesMaintenant(fichiersRecus);
 
     console.log("\n========================");
     console.log("NOUVEAU MESSAGE");

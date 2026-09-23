@@ -4,10 +4,16 @@ const path = require("path");
 const { genererJson, generer, partieFichier } = require("./ia");
 const { prepareDailyBatch } = require("./batch");
 const { faitsDePonctualite } = require("./presence");
-const { localToday, allocateReportNumber } = require("./database");
+const {
+  localToday,
+  allocateReportNumber,
+  texteConnu,
+  memoriserTexte,
+} = require("./database");
 const { ecrire } = require("./docx-rapport");
 const { extractWord } = require("./extractors");
 const { ocr } = require("./mistral");
+const gemini = require("./gemini");
 
 // ---------------------------------------------------------------------------
 // Rapport consolide, en JSON puis en Word
@@ -475,66 +481,103 @@ const CONSIGNE_LECTURE =
   `aucune conclusion. Si une mention est illisible, ecris [illisible] plutot\n` +
   `que de la deviner.`;
 
+// Trois moteurs, essayes dans l'ordre, et le resultat garde pour toujours.
+//
+// Le 23 septembre, Mistral et OpenRouter ont refuse en meme temps -- quota
+// epuise d'un cote, plafond de cle atteint de l'autre -- et les six comptes
+// rendus du lundi sont ressortis "lecture impossible" alors que les PDF
+// etaient sur le disque depuis la veille. Deux parades :
+//
+//   un troisieme moteur, Gemini, qui lit les PDF nativement et dispose d'un
+//   palier gratuit ;
+//   et surtout la memoire : une lecture reussie une fois ne se refait jamais.
+//   Une panne de fournisseur ne peut plus effacer une journee deja lue.
 async function lirePiece(chemin, nom) {
   const ext = path.extname(chemin || "").toLowerCase();
 
-  // Word est lu par le programme : ni appel, ni cout, ni risque d'invention.
-  if (ext === ".docx") {
-    return { texte: await extractWord(chemin), usage: {} };
+  const connu = texteConnu(chemin);
+
+  if (connu) {
+    return { texte: connu.texte, usage: {}, moteur: `${connu.moteur}, en memoire` };
   }
 
-  // Mistral OCR d'abord : c'est un moteur de reconnaissance dedie, il coute
-  // bien moins cher que le modele de vision et il ne depend pas du lecteur de
-  // PDF d'OpenRouter, qui se met en limitation de debit sans prevenir et fait
-  // alors disparaitre un compte rendu du rapport.
-  //
-  // En cas d'echec, quelle qu'en soit la cause -- quota epuise, limitation de
-  // debit, panne --, la lecture repart sur le modele de vision. Le rapport
-  // sort dans tous les cas ; seul son cout change.
-  try {
-    if (OCR_ACTIF === false) {
-      throw new Error("OCR desactive par RAPPORT_OCR");
+  const garder = (texte, moteur) => {
+    memoriserTexte({ file_path: chemin, file_name: nom, texte, moteur });
+
+    return { texte, usage: {}, moteur };
+  };
+
+  // Word est lu par le programme : ni appel, ni cout, ni risque d'invention.
+  if (ext === ".docx") {
+    return garder(await extractWord(chemin), "word");
+  }
+
+  const echecs = [];
+
+  // Mistral OCR d'abord : moteur de reconnaissance dedie, le plus rapide et
+  // le moins cher sur les scans.
+  if (OCR_ACTIF !== false) {
+    try {
+      const pages = await ocr(chemin);
+
+      const texte = pages
+        .map((page) => (page.markdown || "").trim())
+        .filter(Boolean)
+        .join("\n\n");
+
+      if (texte) {
+        return garder(texte, "ocr");
+      }
+
+      echecs.push("OCR : document vide");
+    } catch (erreur) {
+      echecs.push(`OCR : ${erreur.message}`);
     }
+  }
 
-    const pages = await ocr(chemin);
-
-    const texte = pages
-      .map((page) => (page.markdown || "").trim())
-      .filter(Boolean)
-      .join("\n\n");
-
-    if (texte) {
-      return { texte, usage: {}, moteur: "ocr" };
+  // Gemini ensuite : gratuit dans son palier d'entree, et surtout servi par
+  // un fournisseur different des deux autres.
+  if (gemini.disponible()) {
+    try {
+      return garder(await gemini.lire(chemin, CONSIGNE_LECTURE), "gemini");
+    } catch (erreur) {
+      echecs.push(`Gemini : ${erreur.message}`);
     }
-  } catch (erreur) {
-    console.warn(
-      `[rapport] OCR indisponible pour ${nom} (${erreur.message}). ` +
-      `Lecture par le modele de vision.`
-    );
   }
 
   const partie = partieFichier(chemin);
 
   if (!partie) {
-    return null;
+    throw new Error(
+      `Aucun moteur n'a pu lire ce format${echecs.length ? ` -- ${echecs.join(" ; ")}` : ""}`
+    );
   }
 
-  const { texte, usage } = await generer({
-    tache: "VISION",
-    temperature: 0,
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "text", text: CONSIGNE_LECTURE },
-          { type: "text", text: `\nDOCUMENT : ${nom}` },
-          partie,
-        ],
-      },
-    ],
-  });
+  try {
+    const { texte } = await generer({
+      tache: "VISION",
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: CONSIGNE_LECTURE },
+            { type: "text", text: `\nDOCUMENT : ${nom}` },
+            partie,
+          ],
+        },
+      ],
+    });
 
-  return { texte, usage, moteur: "vision" };
+    return garder(texte, "vision");
+  } catch (erreur) {
+    echecs.push(`Vision : ${erreur.message}`);
+  }
+
+  // Les trois moteurs muets : on dit lesquels et pourquoi, sinon la DRH lit
+  // "lecture impossible" sans savoir s'il faut recharger un compte ou
+  // renvoyer le fichier.
+  throw new Error(echecs.join(" ; "));
 }
 
 async function lirePiecesJointes(batch) {

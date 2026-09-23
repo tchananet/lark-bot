@@ -60,6 +60,52 @@ db.exec(`
 `);
 
 
+// Le texte d'un document, garde une fois pour toutes.
+//
+// Les pieces n'etaient lues qu'au moment du rapport. Le 23 septembre, les
+// deux moteurs etaient indisponibles en meme temps -- quota Mistral epuise,
+// plafond de la cle OpenRouter atteint -- et les six comptes rendus du lundi
+// sont ressortis "lecture impossible", alors que les PDF etaient sur le
+// disque depuis la veille.
+//
+// Une lecture reussie, a n'importe quel moment, doit valoir pour toujours :
+// une panne de fournisseur ne peut plus effacer une journee, une
+// regeneration ne coute plus rien, et un fichier n'est jamais lu deux fois.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS document_textes (
+    file_path TEXT PRIMARY KEY,
+    file_name TEXT,
+    texte TEXT NOT NULL,
+    moteur TEXT,
+    caracteres INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+
+function texteConnu(cheminFichier) {
+  return db.prepare(`
+    SELECT texte, moteur FROM document_textes WHERE file_path = ?
+  `).get(cheminFichier) || null;
+}
+
+
+function memoriserTexte({ file_path, file_name, texte, moteur }) {
+  if (!file_path || !(texte || "").trim()) {
+    return;
+  }
+
+  return db.prepare(`
+    INSERT INTO document_textes (file_path, file_name, texte, moteur, caracteres)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(file_path) DO UPDATE SET
+      texte = excluded.texte,
+      moteur = excluded.moteur,
+      caracteres = excluded.caracteres
+  `).run(file_path, file_name || null, texte, moteur || null, texte.length);
+}
+
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -310,6 +356,8 @@ function saveMessage(data) {
 
 module.exports = {
   db,
+  texteConnu,
+  memoriserTexte,
   saveMessage,
   saveAttachment,
   saveUser,
