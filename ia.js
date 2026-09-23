@@ -17,8 +17,13 @@ const path = require("path");
 //                           4.7-flash ecrivait cinq fois plus de tokens pour
 //                           le meme document, donc coutait plus cher malgre
 //                           un prix au token inferieur.
-//   VISION   glm-5.3-flash  13 arrivees sur 14 lues correctement sur la
-//                           fiche manuscrite reelle.
+//   VISION   gemini-2.5-flash-lite  19 heures d'arrivee sur 21 sur la fiche
+//                           manuscrite reelle, en 7 s pour 0,0005 $. Mesure
+//                           contre quatre concurrents : qwen3.7-flash 18/21
+//                           mais quatre fois plus lent, gpt-5-nano 10/21 pour
+//                           cinq fois le prix, gemma-3-12b 10/21, et
+//                           glm-5.3-flash -- le choix precedent -- incapable
+//                           de rendre un JSON valide.
 // ---------------------------------------------------------------------------
 
 const BASE = process.env.IA_BASE_URL || "https://openrouter.ai/api/v1";
@@ -26,7 +31,7 @@ const BASE = process.env.IA_BASE_URL || "https://openrouter.ai/api/v1";
 const MODELES = {
   ROUTAGE: process.env.IA_MODELE_ROUTAGE || "mistralai/mistral-nemo",
   RAPPORT: process.env.IA_MODELE_RAPPORT || "deepseek/deepseek-v3.2",
-  VISION: process.env.IA_MODELE_VISION || "z-ai/glm-5.3-flash",
+  VISION: process.env.IA_MODELE_VISION || "google/gemini-2.5-flash-lite",
 };
 
 const TIMEOUTS = {
@@ -262,18 +267,32 @@ async function messageAvecPages(texte, fichiers = []) {
     const nom = path.basename(chemin);
 
     if (path.extname(chemin).toLowerCase() === ".pdf") {
-      const images = await pagesEnImages(chemin);
+      let images = [];
 
-      images.forEach((url, i) => {
-        parties.push({
-          type: "text",
-          text: `\nPIECE JOINTE : ${nom} — page ${i + 1} sur ${images.length}`,
+      try {
+        images = await pagesEnImages(chemin);
+      } catch (erreur) {
+        // Le rendu passe par une bibliotheque graphique native qui echoue
+        // sous pression memoire. Le PDF part alors tel quel : cela redemande
+        // 0,50 $ de solde disponible, mais vaut mieux que ne rien envoyer.
+        console.warn(
+          `[ia] conversion en images impossible pour ${nom} ` +
+          `(${erreur.message}). Envoi du PDF tel quel.`
+        );
+      }
+
+      if (images.length) {
+        images.forEach((url, i) => {
+          parties.push({
+            type: "text",
+            text: `\nPIECE JOINTE : ${nom} — page ${i + 1} sur ${images.length}`,
+          });
+
+          parties.push({ type: "image_url", image_url: { url } });
         });
 
-        parties.push({ type: "image_url", image_url: { url } });
-      });
-
-      continue;
+        continue;
+      }
     }
 
     const partie = partieFichier(chemin);

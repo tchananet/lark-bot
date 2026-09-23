@@ -12,7 +12,6 @@ const {
 } = require("./database");
 const { ecrire } = require("./docx-rapport");
 const { extractWord } = require("./extractors");
-const { ocr } = require("./mistral");
 const gemini = require("./gemini");
 const { lireTextePdf } = require("./texte-pdf");
 
@@ -470,8 +469,6 @@ async function produireJson(consigne, schema, type, corrections = null) {
 
 const MAX_PIECES = Number(process.env.RAPPORT_MAX_PIECES || 20);
 
-// Mettre RAPPORT_OCR=false pour lire les pieces jointes uniquement par le
-// modele de vision, sans passer par Mistral.
 const OCR_ACTIF = process.env.RAPPORT_OCR !== "false";
 const MAX_OCTETS_PIECE = Number(process.env.RAPPORT_MAX_OCTETS_PIECE || 15 * 1024 * 1024);
 
@@ -541,27 +538,6 @@ async function lirePiece(chemin, nom) {
       return garder(await gemini.lire(chemin, CONSIGNE_LECTURE), "gemini");
     } catch (erreur) {
       echecs.push(`Gemini : ${erreur.message}`);
-    }
-  }
-
-  // Mistral OCR ensuite : moteur de reconnaissance dedie, bien plus rapide
-  // que les modeles de vision quand son quota le permet.
-  if (OCR_ACTIF !== false) {
-    try {
-      const pages = await ocr(chemin);
-
-      const texte = pages
-        .map((page) => (page.markdown || "").trim())
-        .filter(Boolean)
-        .join("\n\n");
-
-      if (texte) {
-        return garder(texte, "ocr");
-      }
-
-      echecs.push("OCR : document vide");
-    } catch (erreur) {
-      echecs.push(`OCR : ${erreur.message}`);
     }
   }
 

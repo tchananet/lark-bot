@@ -1,6 +1,5 @@
 const { genererJson, messageAvecPages } = require("./ia");
 const { normaliserHeure } = require("./temps");
-const { lirePointage: lireOcrMistral } = require("./mistral");
 const gemini = require("./gemini");
 const {
   listerEmployes,
@@ -160,34 +159,6 @@ async function lirePointageUnePasse(chemin) {
 }
 
 
-// Premiere lecture : moteur OCR dedie de Mistral. Ramenee exactement a la
-// meme forme que la lecture Gemini, pour que la confrontation ignore d'ou
-// vient chaque version.
-async function lirePointageMistral(chemin) {
-  const pages = await lireOcrMistral(chemin);
-  const parJour = new Map();
-
-  for (const page of pages) {
-    const lignes = parJour.get(page.date) || new Map();
-
-    for (const ligne of page.lignes) {
-      lignes.set(cleNom(ligne.nom), {
-        nom: ligne.nom.trim(),
-        heure_arrivee: normaliserHeure(ligne.heure_arrivee),
-        heure_depart_pause: normaliserHeure(ligne.heure_depart_pause),
-        heure_retour_pause: normaliserHeure(ligne.heure_retour_pause),
-        heure_depart: normaliserHeure(ligne.heure_depart),
-        observation: (ligne.observation || "").trim() || null,
-      });
-    }
-
-    parJour.set(page.date, lignes);
-  }
-
-  return parJour;
-}
-
-
 // Confronte deux lectures. Ce sur quoi elles s'accordent est retenu ; tout
 // desaccord part en revue plutot que d'entrer dans les chiffres.
 function confronter(passeA, passeB) {
@@ -276,7 +247,6 @@ async function extrairePointage(chemin, options = {}) {
   // ainsi fait disparaitre la fiche du 21 et du 22.
   const moteurs = [
     ["Gemini", () => lirePointageGemini(chemin)],
-    ["Mistral OCR", () => lirePointageMistral(chemin)],
     ["le modele de vision", () => lirePointageUnePasse(chemin)],
   ].filter(([nom]) => nom !== "Gemini" || gemini.disponible());
 
