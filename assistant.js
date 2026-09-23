@@ -67,6 +67,15 @@ async function traiterPointage(fichiers, repondre) {
       `Fiche lue : ${resultat.dates.join(", ")}.\n` +
       `${resultat.enregistres} pointage(s) enregistre(s).`;
 
+    // Normalement deux moteurs se relisent l'un l'autre. Quand l'un tombe,
+    // la fiche passe quand meme, mais sans ce filet : autant le dire.
+    if (resultat.moteur_unique) {
+      message +=
+        `\n\nAttention : un seul moteur de lecture a repondu ` +
+        `(${resultat.moteur_unique}). Les heures n'ont pas ete recoupees, ` +
+        `verifiez-les sur la fiche papier.`;
+    }
+
     if (resultat.en_revue) {
       message +=
         `\n${resultat.en_revue} cellule(s) illisible(s), laissee(s) de cote ` +

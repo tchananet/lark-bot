@@ -245,12 +245,48 @@ async function extrairePointage(chemin, options = {}) {
   // ensemble. Sur la fiche du 15/09, Gemini a lu deux fois 08h02 puis 08h09
   // la ou il fallait lire 08h22 ; Mistral lit 08h22. Un desaccord entre
   // moteurs signale precisement les cellules reellement ambigues.
-  const [passeA, passeB] = await Promise.all([
+  // Promise.all rejette des qu'un moteur echoue, et jetait alors la lecture
+  // de l'autre, pourtant reussie. Le 23 septembre, Mistral a repondu "Rate
+  // limit exceeded" sur la fiche du 21 et 22 : toute la fiche a ete perdue,
+  // et le rapport du lundi est sorti sans aucune donnee de presence.
+  //
+  // Un moteur qui tombe ne doit pas emporter la fiche. On perd la
+  // confrontation, donc le filet contre les erreurs de lecture, et c'est dit
+  // a la DRH plutot que tu.
+  const [resultatA, resultatB] = await Promise.allSettled([
     lirePointageMistral(chemin),
     lirePointageUnePasse(chemin),
   ]);
 
-  const { retenus, divergences } = confronter(passeA, passeB);
+  const passeA = resultatA.status === "fulfilled" ? resultatA.value : null;
+  const passeB = resultatB.status === "fulfilled" ? resultatB.value : null;
+
+  if (!passeA && !passeB) {
+    throw new Error(
+      `Les deux moteurs de lecture ont echoue. ` +
+      `OCR : ${resultatA.reason?.message || resultatA.reason}. ` +
+      `Vision : ${resultatB.reason?.message || resultatB.reason}.`
+    );
+  }
+
+  let moteurUnique = null;
+  let retenus;
+  let divergences;
+
+  if (passeA && passeB) {
+    ({ retenus, divergences } = confronter(passeA, passeB));
+  } else {
+    const tombe = passeA ? resultatB : resultatA;
+
+    moteurUnique = passeA ? "Mistral OCR" : "le modele de vision";
+    retenus = [...(passeA || passeB).values()].flatMap((jour) => [...jour.values()]);
+    divergences = [];
+
+    console.warn(
+      `[extraction] lecture simple : seul ${moteurUnique} a repondu ` +
+      `(${tombe.reason?.message || tombe.reason}). Aucune confrontation.`
+    );
+  }
 
   let enregistres = 0;
   let vides = 0;
@@ -306,6 +342,7 @@ async function extrairePointage(chemin, options = {}) {
     vides,
     en_revue: enRevue.length,
     divergences: enRevue,
+    moteur_unique: moteurUnique,
   };
 }
 
