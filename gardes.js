@@ -136,6 +136,8 @@ async function charger(chemin) {
 }
 
 
+// Meme raison : rien ne doit s executer a la simple lecture du fichier.
+if (require.main === module) {
 const index = process.argv.indexOf("--fichier");
 
 if (index !== -1 && process.argv[index + 1]) {
@@ -145,4 +147,5 @@ if (index !== -1 && process.argv[index + 1]) {
   });
 } else {
   etat();
+}
 }

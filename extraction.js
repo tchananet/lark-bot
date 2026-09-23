@@ -473,5 +473,5 @@ module.exports = {
   classerDocument,
   confronter,
   lirePointageUnePasse,
-  lirePointageMistral,
+  lirePointageGemini,
 };

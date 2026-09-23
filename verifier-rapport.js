@@ -316,7 +316,11 @@ async function principal() {
   }
 }
 
-principal().catch((erreur) => {
-  console.error(erreur);
-  process.exitCode = 1;
-});
+// Charge par un autre module -- le test qui verifie que tout se charge --
+// ce fichier ne doit rien afficher ni rien interroger.
+if (require.main === module) {
+  principal().catch((erreur) => {
+    console.error(erreur);
+    process.exitCode = 1;
+  });
+}
