@@ -1,4 +1,4 @@
-const { genererJson, messageUtilisateur } = require("./ia");
+const { genererJson, messageAvecPages } = require("./ia");
 const { normaliserHeure } = require("./temps");
 const { lirePointage: lireOcrMistral } = require("./mistral");
 const gemini = require("./gemini");
@@ -151,7 +151,7 @@ async function lirePointageGemini(chemin) {
 async function lirePointageUnePasse(chemin) {
   const { donnees } = await genererJson({
     tache: "VISION",
-    messages: [messageUtilisateur(promptPointage(), [chemin])],
+    messages: [await messageAvecPages(promptPointage(), [chemin])],
     schema: SCHEMA_POINTAGE,
     temperature: TEMPERATURE_EXTRACTION,
   });

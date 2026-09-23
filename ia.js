@@ -245,6 +245,48 @@ function messageUtilisateur(texte, fichiers = []) {
   return { role: "user", content: parties.length === 1 ? texte : parties };
 }
 
+
+// Le meme message, mais un PDF scanne part en IMAGES plutot qu'en fichier.
+//
+// OpenRouter exige 0,50 $ de solde disponible pour ouvrir une piece jointe
+// PDF -- c'est ce qui bloquait la lecture des fiches de presence alors qu'il
+// restait 0,28 $. Une image n'a pas cette condition, coute moins cher, et
+// tous les modeles de vision l'acceptent, pas seulement ceux qui gerent les
+// fichiers.
+async function messageAvecPages(texte, fichiers = []) {
+  const { pagesEnImages } = require("./image-pdf");
+
+  const parties = [{ type: "text", text: texte }];
+
+  for (const chemin of fichiers) {
+    const nom = path.basename(chemin);
+
+    if (path.extname(chemin).toLowerCase() === ".pdf") {
+      const images = await pagesEnImages(chemin);
+
+      images.forEach((url, i) => {
+        parties.push({
+          type: "text",
+          text: `\nPIECE JOINTE : ${nom} — page ${i + 1} sur ${images.length}`,
+        });
+
+        parties.push({ type: "image_url", image_url: { url } });
+      });
+
+      continue;
+    }
+
+    const partie = partieFichier(chemin);
+
+    if (partie) {
+      parties.push({ type: "text", text: `\nPIECE JOINTE : ${nom}` });
+      parties.push(partie);
+    }
+  }
+
+  return { role: "user", content: parties.length === 1 ? texte : parties };
+}
+
 module.exports = {
   MODELES,
   sansCloture,
@@ -252,4 +294,5 @@ module.exports = {
   genererJson,
   partieFichier,
   messageUtilisateur,
+  messageAvecPages,
 };

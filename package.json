@@ -22,6 +22,7 @@
     "docx": "^9.7.1",
     "docxtemplater": "^3.70.1",
     "dotenv": "^17.4.2",
+    "jimp": "^1.6.1",
     "mammoth": "^1.12.1",
     "node-cron": "^4.6.0",
     "pdf-parse": "^2.4.5",
