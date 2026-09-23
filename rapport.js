@@ -14,6 +14,7 @@ const { ecrire } = require("./docx-rapport");
 const { extractWord } = require("./extractors");
 const { ocr } = require("./mistral");
 const gemini = require("./gemini");
+const { lireTextePdf } = require("./texte-pdf");
 
 // ---------------------------------------------------------------------------
 // Rapport consolide, en JSON puis en Word
@@ -513,6 +514,24 @@ async function lirePiece(chemin, nom) {
   }
 
   const echecs = [];
+
+  // Un PDF exporte depuis Word porte deja son texte. Aucun modele n'est
+  // necessaire, aucun quota consomme, et ce qu'on en tire est exactement ce
+  // que le service a redige -- sans le risque qu'une lecture le deforme.
+  // Seule la fiche de presence, vraie photo, n'a aucune couche texte.
+  if (ext === ".pdf") {
+    try {
+      const texte = await lireTextePdf(chemin);
+
+      if (texte) {
+        return garder(texte, "pdf");
+      }
+
+      echecs.push("PDF : aucune couche texte, document scanne");
+    } catch (erreur) {
+      echecs.push(`PDF : ${erreur.message}`);
+    }
+  }
 
   // Gemini en premier : son palier d entree est gratuit, il lit les PDF
   // nativement, et il ne consomme ni le quota Mistral ni le plafond de la

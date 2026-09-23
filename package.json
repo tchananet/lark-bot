@@ -24,6 +24,7 @@
     "dotenv": "^17.4.2",
     "mammoth": "^1.12.1",
     "node-cron": "^4.6.0",
+    "pdf-parse": "^2.4.5",
     "pizzip": "^3.2.0"
   }
 }
