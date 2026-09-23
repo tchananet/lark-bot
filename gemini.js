@@ -19,7 +19,15 @@ const path = require("path");
 // chaine repart sur les moteurs suivants.
 // ---------------------------------------------------------------------------
 
-const MODELE = process.env.GEMINI_MODELE || "gemini-3.6-flash";
+// Plusieurs modeles plutot qu un seul. Le palier gratuit sature modele par
+// modele : quand gemini-3.6-flash repond "high demand", un modele plus leger
+// passe souvent du premier coup. Attendre le meme backend pendant une minute
+// ne sert a rien, basculer coute une seconde.
+const MODELES = (process.env.GEMINI_MODELES ||
+  "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-2.5-flash"
+).split(",").map((m) => m.trim()).filter(Boolean);
+
+const MODELE = MODELES[0];
 const RACINE = "https://generativelanguage.googleapis.com/v1beta";
 const DELAI = Number(process.env.GEMINI_TIMEOUT || 180000);
 const TENTATIVES = Number(process.env.GEMINI_TENTATIVES || 4);
@@ -55,10 +63,13 @@ async function appeler(corps) {
 
   let dernier = null;
 
+  // Chaque modele est essaye a son tour ; on ne s acharne pas sur un backend
+  // sature quand un autre est libre.
+  for (const modele of MODELES) {
   for (let essai = 1; essai <= TENTATIVES; essai++) {
     try {
       const reponse = await fetch(
-        `${RACINE}/models/${MODELE}:generateContent?key=${cle}`,
+        `${RACINE}/models/${modele}:generateContent?key=${cle}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -75,7 +86,7 @@ async function appeler(corps) {
 
       const message = json?.error?.message || String(reponse.status);
 
-      dernier = new Error(`Gemini : ${message}`);
+      dernier = new Error(`Gemini (${modele}) : ${message}`);
 
       // 429 file d'attente, 5xx incident passager, "high demand" surcharge.
       // Une cle invalide ou un modele retire, eux, ne s'arrangeront pas.
@@ -84,26 +95,33 @@ async function appeler(corps) {
         reponse.status >= 500 ||
         /high demand|overload/i.test(message);
 
-      if (!retentable || essai === TENTATIVES) {
-        throw dernier;
+      // Modele sature ou retire : inutile d insister, on passe au suivant.
+      if (!retentable) {
+        break;
+      }
+
+      if (essai === TENTATIVES) {
+        break;
       }
     } catch (erreur) {
       dernier = erreur;
 
       if (essai === TENTATIVES) {
-        throw dernier;
+        break;
       }
     }
 
-    const delai = 5000 * essai;
+    const delai = 3000 * essai;
 
     console.warn(
-      `[gemini] Tentative ${essai}/${TENTATIVES} echouee ` +
-      `(${String(dernier.message).slice(0, 80)}). ` +
-      `Nouvelle tentative dans ${delai / 1000}s.`
+      `[gemini] ${modele}, tentative ${essai}/${TENTATIVES} ` +
+      `(${String(dernier.message).slice(0, 70)}). Reprise dans ${delai / 1000}s.`
     );
 
     await attendre(delai);
+  }
+
+  console.warn(`[gemini] ${modele} indisponible, modele suivant.`);
   }
 
   throw dernier;
