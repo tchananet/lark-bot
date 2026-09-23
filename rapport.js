@@ -514,8 +514,19 @@ async function lirePiece(chemin, nom) {
 
   const echecs = [];
 
-  // Mistral OCR d'abord : moteur de reconnaissance dedie, le plus rapide et
-  // le moins cher sur les scans.
+  // Gemini en premier : son palier d entree est gratuit, il lit les PDF
+  // nativement, et il ne consomme ni le quota Mistral ni le plafond de la
+  // cle OpenRouter. Les deux autres ne servent plus que de secours.
+  if (gemini.disponible()) {
+    try {
+      return garder(await gemini.lire(chemin, CONSIGNE_LECTURE), "gemini");
+    } catch (erreur) {
+      echecs.push(`Gemini : ${erreur.message}`);
+    }
+  }
+
+  // Mistral OCR ensuite : moteur de reconnaissance dedie, bien plus rapide
+  // que les modeles de vision quand son quota le permet.
   if (OCR_ACTIF !== false) {
     try {
       const pages = await ocr(chemin);
@@ -532,16 +543,6 @@ async function lirePiece(chemin, nom) {
       echecs.push("OCR : document vide");
     } catch (erreur) {
       echecs.push(`OCR : ${erreur.message}`);
-    }
-  }
-
-  // Gemini ensuite : gratuit dans son palier d'entree, et surtout servi par
-  // un fournisseur different des deux autres.
-  if (gemini.disponible()) {
-    try {
-      return garder(await gemini.lire(chemin, CONSIGNE_LECTURE), "gemini");
-    } catch (erreur) {
-      echecs.push(`Gemini : ${erreur.message}`);
     }
   }
 

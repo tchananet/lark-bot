@@ -1,6 +1,7 @@
 const { genererJson, messageUtilisateur } = require("./ia");
 const { normaliserHeure } = require("./temps");
 const { lirePointage: lireOcrMistral } = require("./mistral");
+const gemini = require("./gemini");
 const {
   listerEmployes,
   resoudreEmploye,
@@ -100,14 +101,10 @@ Regles de transcription :
 }
 
 
-async function lirePointageUnePasse(chemin) {
-  const { donnees } = await genererJson({
-    tache: "VISION",
-    messages: [messageUtilisateur(promptPointage(), [chemin])],
-    schema: SCHEMA_POINTAGE,
-    temperature: TEMPERATURE_EXTRACTION,
-  });
-
+// Les trois moteurs rendent la meme structure de pages ; seule la mise en
+// forme differe. On la fait une fois pour toutes, sinon la confrontation
+// comparerait des ecritures d'heures plutot que des lectures.
+function rangerParJour(donnees) {
   const parJour = new Map();
 
   for (const page of donnees.pages || []) {
@@ -136,6 +133,30 @@ async function lirePointageUnePasse(chemin) {
   }
 
   return parJour;
+}
+
+
+// Gemini : palier gratuit, lit les PDF et les photos nativement. C'est le
+// moteur principal depuis que les quotas Mistral et OpenRouter se sont
+// epuises le meme jour, emportant une fiche entiere.
+async function lirePointageGemini(chemin) {
+  return rangerParJour(
+    await gemini.lireJson(chemin, promptPointage(), SCHEMA_POINTAGE)
+  );
+}
+
+
+// Le modele de vision passe par OpenRouter, donc par un compte payant. Il
+// reste en dernier recours.
+async function lirePointageUnePasse(chemin) {
+  const { donnees } = await genererJson({
+    tache: "VISION",
+    messages: [messageUtilisateur(promptPointage(), [chemin])],
+    schema: SCHEMA_POINTAGE,
+    temperature: TEMPERATURE_EXTRACTION,
+  });
+
+  return rangerParJour(donnees);
 }
 
 
@@ -245,46 +266,51 @@ async function extrairePointage(chemin, options = {}) {
   // ensemble. Sur la fiche du 15/09, Gemini a lu deux fois 08h02 puis 08h09
   // la ou il fallait lire 08h22 ; Mistral lit 08h22. Un desaccord entre
   // moteurs signale precisement les cellules reellement ambigues.
-  // Promise.all rejette des qu'un moteur echoue, et jetait alors la lecture
-  // de l'autre, pourtant reussie. Le 23 septembre, Mistral a repondu "Rate
-  // limit exceeded" sur la fiche du 21 et 22 : toute la fiche a ete perdue,
-  // et le rapport du lundi est sorti sans aucune donnee de presence.
+  // Trois moteurs, essayes ensemble. On en retient DEUX, qui se relisent l'un
+  // l'autre : deux passes d'un meme modele partagent les memes angles morts
+  // et se trompent ensemble, deux moteurs differents ne se trompent pas au
+  // meme endroit.
   //
-  // Un moteur qui tombe ne doit pas emporter la fiche. On perd la
-  // confrontation, donc le filet contre les erreurs de lecture, et c'est dit
-  // a la DRH plutot que tu.
-  const [resultatA, resultatB] = await Promise.allSettled([
-    lirePointageMistral(chemin),
-    lirePointageUnePasse(chemin),
-  ]);
+  // Promise.all rejetait des qu'un seul echouait, en jetant au passage les
+  // lectures reussies. Le 23 septembre, un "Rate limit exceeded" de Mistral a
+  // ainsi fait disparaitre la fiche du 21 et du 22.
+  const moteurs = [
+    ["Gemini", () => lirePointageGemini(chemin)],
+    ["Mistral OCR", () => lirePointageMistral(chemin)],
+    ["le modele de vision", () => lirePointageUnePasse(chemin)],
+  ].filter(([nom]) => nom !== "Gemini" || gemini.disponible());
 
-  const passeA = resultatA.status === "fulfilled" ? resultatA.value : null;
-  const passeB = resultatB.status === "fulfilled" ? resultatB.value : null;
+  const resultats = await Promise.allSettled(moteurs.map(([, lire]) => lire()));
 
-  if (!passeA && !passeB) {
-    throw new Error(
-      `Les deux moteurs de lecture ont echoue. ` +
-      `OCR : ${resultatA.reason?.message || resultatA.reason}. ` +
-      `Vision : ${resultatB.reason?.message || resultatB.reason}.`
-    );
+  const reussies = [];
+  const echecs = [];
+
+  resultats.forEach((resultat, i) => {
+    if (resultat.status === "fulfilled") {
+      reussies.push({ nom: moteurs[i][0], pages: resultat.value });
+    } else {
+      echecs.push(`${moteurs[i][0]} : ${resultat.reason?.message || resultat.reason}`);
+    }
+  });
+
+  if (!reussies.length) {
+    throw new Error(`Aucun moteur n'a pu lire la fiche. ${echecs.join(" ; ")}`);
   }
 
   let moteurUnique = null;
   let retenus;
   let divergences;
 
-  if (passeA && passeB) {
-    ({ retenus, divergences } = confronter(passeA, passeB));
+  if (reussies.length >= 2) {
+    ({ retenus, divergences } = confronter(reussies[0].pages, reussies[1].pages));
   } else {
-    const tombe = passeA ? resultatB : resultatA;
-
-    moteurUnique = passeA ? "Mistral OCR" : "le modele de vision";
-    retenus = [...(passeA || passeB).values()].flatMap((jour) => [...jour.values()]);
+    moteurUnique = reussies[0].nom;
+    retenus = [...reussies[0].pages.values()].flatMap((jour) => [...jour.values()]);
     divergences = [];
 
     console.warn(
       `[extraction] lecture simple : seul ${moteurUnique} a repondu ` +
-      `(${tombe.reason?.message || tombe.reason}). Aucune confrontation.`
+      `(${echecs.join(" ; ")}). Aucune confrontation.`
     );
   }
 
