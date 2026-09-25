@@ -392,6 +392,15 @@ async function handleMessage(data) {
     // l'assistant si l'expediteur est la DRH.
     const fichiersRecus = [];
 
+    // Le texte ecrit par l'expediteur, quel que soit le type de message.
+    //
+    // Le routage ne le recuperait que pour les messages "text". Un post -- le
+    // format qu'on obtient des qu'on joint un fichier a une phrase -- arrivait
+    // donc toujours avec un texte vide, alors que parsePostContent l'avait
+    // extrait et que la base l'avait enregistre. Le garde des absences voyait
+    // "" et ecartait des declarations reelles.
+    let texteRecu = "";
+
     const expediteur = {
       open_id: sender.sender_id.open_id,
       nom: larkUser?.name || null,
@@ -428,6 +437,8 @@ async function handleMessage(data) {
 
     if (message.message_type === "text") {
         const text = parsedContent.text;
+
+        texteRecu = text || "";
 
         console.log("Contenu :", text);
 
@@ -571,6 +582,8 @@ async function handleMessage(data) {
 
         const textContent = post.text.join("\n");
 
+        texteRecu = textContent;
+
         
         saveMessage({
             message_id: message.message_id,
@@ -658,12 +671,9 @@ async function handleMessage(data) {
     await lireDesMaintenant(fichiersRecus);
 
     if (rh) {
-      const texte =
-        message.message_type === "text" ? parsedContent.text || "" : "";
-
       try {
         const analyse = await traiter({
-          texte,
+          texte: texteRecu,
           fichiers: fichiersRecus,
           expediteur,
           repondre: (reponse) => sendTextToChat(message.chat_id, reponse),

@@ -18,12 +18,10 @@ const path = require("path");
 // index.js est exclu : le charger ouvre la connexion Lark et le serveur web.
 // ---------------------------------------------------------------------------
 
-const EXCLUS = new Set([
-  "index.js",
-  "bot.js",
-  "modules.test.js",
-  "presence.test.js",
-]);
+// Les tests sont exclus par motif, pas par liste : une liste nominative
+// s'oublie, et le dernier test ajoute venait de faire echouer celui-ci en
+// rejouant ses propres insertions.
+const EXCLUS = new Set(["index.js", "bot.js"]);
 
 let reussis = 0;
 
@@ -34,7 +32,7 @@ process.env.DATABASE_PATH =
 
 const modules = fs
   .readdirSync(__dirname)
-  .filter((f) => f.endsWith(".js") && !EXCLUS.has(f))
+  .filter((f) => f.endsWith(".js") && !f.endsWith(".test.js") && !EXCLUS.has(f))
   .sort();
 
 for (const fichier of modules) {

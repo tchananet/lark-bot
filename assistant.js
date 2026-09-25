@@ -131,6 +131,34 @@ function sansAccents(valeur) {
     .toUpperCase();
 }
 
+// Ce que l'expediteur a REELLEMENT soumis : son texte, plus le contenu des
+// documents qu'il a joints.
+//
+// Le garde ne regardait que le texte du message. Or un "post" Lark ne portant
+// que des fichiers arrive avec un texte vide : le 25 septembre, deux absences
+// -- NGA ISABELLE et MARIE SHARONE ETOUNA -- ont ete ecartees alors qu'elles
+// etaient nommees dans le planning joint. Trop strict, le garde effacait de
+// vraies declarations.
+//
+// Un nom ecrit dans une piece que l'expediteur a lui-meme envoyee n'est pas
+// une invention du modele : c'est une preuve. Seul compte le texte deja
+// EXTRAIT et garde en base -- jamais une sortie de modele, sans quoi le garde
+// validerait ce qu'il est cense surveiller.
+function texteSoumis(texte, fichiers = []) {
+  const morceaux = [texte || ""];
+
+  for (const chemin of fichiers) {
+    const connu = texteConnu(chemin);
+
+    if (connu) {
+      morceaux.push(connu.texte);
+    }
+  }
+
+  return morceaux.join("\n");
+}
+
+
 function citeDansLeMessage(nom, texte) {
   const corps = sansAccents(texte);
 
@@ -203,14 +231,15 @@ async function traiterAbsences(absences, expediteur, repondre, texte = "") {
 
   if (inventees.length) {
     console.warn(
-      `[assistant] absences ecartees, personne non citee dans le message : ` +
-      `${inventees.join(", ")} -- message : ${JSON.stringify(texte.slice(0, 120))}`
+      `[assistant] absences ecartees, personne citee ni dans le message ni ` +
+      `dans les pieces jointes : ${inventees.join(", ")} -- ` +
+      `${texte.trim().length} caracteres fouilles`
     );
 
     message +=
-      `${message ? "\n\n" : ""}Votre message ne nomme personne. ` +
-      `Rien n'a ete enregistre. Si vous vouliez declarer une absence, ` +
-      `precisez la personne, la date et le motif.`;
+      `${message ? "\n\n" : ""}Ni votre message ni les pièces ` +
+      `jointes ne nomment cette personne. Rien n'a été enregistré. ` +
+      `Précisez la personne, la date et le motif.`;
   }
 
   await repondre(message || "Aucune absence exploitable dans ce message.");
@@ -650,11 +679,15 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
       return analyse;
 
     case "PERMISSION":
-      await traiterAbsences(analyse.absences, expediteur, repondre, texte);
+      await traiterAbsences(
+        analyse.absences, expediteur, repondre, texteSoumis(texte, fichiers)
+      );
       return analyse;
 
     case "CORRECTION":
-      await traiterCorrections(analyse.corrections, expediteur, repondre, texte);
+      await traiterCorrections(
+        analyse.corrections, expediteur, repondre, texteSoumis(texte, fichiers)
+      );
       return analyse;
 
     case "GESTION_ACCES":
@@ -701,4 +734,4 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
   }
 }
 
-module.exports = { traiter };
+module.exports = { traiter, texteSoumis, citeDansLeMessage };
