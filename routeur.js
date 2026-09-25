@@ -16,6 +16,7 @@ const INTENTIONS = [
   "PERMISSION",
   "CORRECTION",
   "DEMANDE_RAPPORT",
+  "ETAT",
   "GESTION_ACCES",
   "AUTRE",
 ];
@@ -74,6 +75,7 @@ const SCHEMA = {
     },
     rapport_date: { type: "string" },
     rapport_portee: { type: "string", enum: ["JOURNEE", "SEMAINE", ""] },
+    etat_dates: { type: "array", items: { type: "string" } },
   },
   required: [
     "intention",
@@ -84,6 +86,7 @@ const SCHEMA = {
     "acces",
     "rapport_date",
     "rapport_portee",
+    "etat_dates",
   ],
 };
 
@@ -108,8 +111,19 @@ CORRECTION : le message rectifie une heure lue sur la fiche de presence.
   Typiquement une reponse a une cellule que le bot a signalee comme
   illisible : "Isabelle est partie a 16h09", "non, Marie est arrivee a
   08h22", "Gloria a fini a 17h46".
-DEMANDE_RAPPORT : le message reclame un rapport, une synthese ou un
-  recapitulatif, pour une date donnee ou pour la derniere journee.
+DEMANDE_RAPPORT : le message reclame la PRODUCTION d'un rapport, d'une
+  synthese ou d'un recapitulatif, pour une date donnee ou pour la derniere
+  journee.
+ETAT : le message demande CE QUI EST DEJA DISPONIBLE, sans reclamer de
+  document. "Qu'est-ce que tu as pour lundi ?", "dis-moi ce qui est arrive
+  pour mardi", "quels services ont transmis cette semaine ?", "la fiche de
+  presence du 21 est-elle arrivee ?". La difference avec DEMANDE_RAPPORT
+  tient en un mot : ETAT demande un CONSTAT, DEMANDE_RAPPORT demande un
+  DOCUMENT. Dans le doute entre les deux, choisis ETAT : un constat coute
+  quelques secondes, un rapport coute plusieurs minutes et de l'argent.
+  Un message qui demande LES DEUX -- "je voudrais faire le rapport, dis-moi
+  d'abord ce que tu as" -- est un ETAT : on repond au constat, et
+  l'expediteur choisit ensuite la journee a produire.
 GESTION_ACCES : le message demande d habiliter quelqu un a dialoguer avec
   l assistant, de lui retirer cette habilitation, ou de savoir qui en
   dispose. Exemples : "ajoute Gloria aux RH", "Isabelle peut aussi utiliser
@@ -146,6 +160,10 @@ acces : uniquement pour GESTION_ACCES.
     enumerer les personnes habilitees. AUCUNE sinon.
   personne : le nom cite, recopie tel quel. Chaine vide pour LISTER.
   Pour toute autre intention, action vaut AUCUNE et personne une chaine vide.
+etat_dates : uniquement pour ETAT. Les journees sur lesquelles porte la
+  question, au format AAAA-MM-JJ, dans l'ordre. "lundi et mardi" en donne
+  deux. Si aucune journee n'est precisee, laisse la liste vide : l'assistant
+  prendra la derniere journee close. Liste vide pour toute autre intention.
 rapport_portee : uniquement pour DEMANDE_RAPPORT. SEMAINE si le message
   demande un bilan portant sur une semaine entiere -- "la semaine derniere",
   "le rapport hebdomadaire", "du 14 au 20". JOURNEE pour une seule journee.
@@ -155,6 +173,10 @@ rapport_date : uniquement pour DEMANDE_RAPPORT, au format AAAA-MM-JJ. Pour
   demandee. Chaine vide si rien n'est precise ou si l'intention est autre.
 
 REGLES
+- UN JOUR DE LA SEMAINE SANS DATE DESIGNE LA DERNIERE OCCURRENCE PASSEE.
+  "lundi" veut dire le lundi qui vient de s'ecouler, jamais celui a venir :
+  on ne demande pas un rapport sur une journee qui n'a pas eu lieu. Idem
+  pour "mardi", "hier", "ce week-end".
 - Ne devine pas une intention a partir du nom du fichier : lis son contenu.
 - Si le message ne demande rien et n'annonce rien, reponds AUTRE.
 - certitude vaut BASSE des que plusieurs lectures sont plausibles.
@@ -162,9 +184,59 @@ REGLES
 }
 
 
+// Une date posterieure a aujourd hui recule de semaine en semaine jusqu a
+// tomber dans le passe, en gardant son jour de la semaine.
+const JOURS_SEMAINE = [
+  "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi",
+];
+
+// Le modele se trompe aussi de jour : il a rendu un dimanche pour "mardi".
+// Or le nom du jour est ecrit noir sur blanc dans le message -- autant le
+// lire nous-memes. Les jours cites, dans l'ordre, ramenes chacun a leur
+// derniere occurrence passee.
+function joursCitesDansLeMessage(texte, aujourdhui) {
+  const corps = String(texte || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+
+  const limite = new Date(`${aujourdhui}T00:00:00Z`);
+  const cites = [];
+
+  // On parcourt le message dans l'ordre d'apparition, pas l'ordre des jours.
+  for (const trouve of corps.matchAll(
+    /\b(dimanche|lundi|mardi|mercredi|jeudi|vendredi|samedi)\b/g
+  )) {
+    const voulu = JOURS_SEMAINE.indexOf(trouve[1]);
+    const recul = (limite.getUTCDay() - voulu + 7) % 7;
+    const d = new Date(limite.getTime() - recul * 86400000);
+    const iso = d.toISOString().slice(0, 10);
+
+    if (!cites.includes(iso)) {
+      cites.push(iso);
+    }
+  }
+
+  return cites;
+}
+
+
+function ramenerAuPasse(iso, aujourdhui) {
+  let d = new Date(`${iso}T00:00:00Z`);
+  const limite = new Date(`${aujourdhui}T00:00:00Z`);
+
+  while (d > limite) {
+    d = new Date(d.getTime() - 7 * 86400000);
+  }
+
+  return d.toISOString().slice(0, 10);
+}
+
+
 async function analyser({ texte = "", fichiers = [] } = {}) {
   const aujourdhui = localToday();
 
+  const joursCites = joursCitesDansLeMessage(texte, aujourdhui);
   const consigne = prompt(aujourdhui, fichiers.length > 0);
   const corps = texte.trim() ? `${consigne}\n\nMESSAGE RECU :\n${texte.trim()}` : consigne;
 
@@ -199,7 +271,34 @@ async function analyser({ texte = "", fichiers = [] } = {}) {
     // le rapport du jour coute moins cher qu'une semaine entiere produite
     // pour rien.
     rapport_portee: analyse.rapport_portee === "SEMAINE" ? "SEMAINE" : "JOURNEE",
+
+    // Le modele place volontiers "lundi" dans la semaine a venir : il a rendu
+    // les 25, 26 et 27 septembre pour "lundi et mardi" un vendredi 25. Une
+    // journee qui n'a pas eu lieu ne peut rien avoir produit, on la ramene
+    // donc a sa derniere occurrence passee.
+    etat_dates: journeesDemandees(analyse.etat_dates, joursCites, aujourdhui),
   };
+}
+
+
+// Deux lectures des journees demandees, et chacune rattrape l'autre.
+//
+// Le programme compte les jours sans se tromper, mais ne reconnait que les
+// noms bien orthographies : "oundi" lui echappe. Le modele lit la faute de
+// frappe, mais rend parfois un dimanche pour "mardi".
+//
+// Quand le programme trouve au moins autant de jours que le modele, il a tout
+// vu et fait foi. Sinon il en a manque, et on reunit les deux listes.
+function journeesDemandees(duModele, joursCites, aujourdhui) {
+  const proposees = (duModele || [])
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .map((d) => ramenerAuPasse(d, aujourdhui));
+
+  if (joursCites.length >= proposees.length) {
+    return joursCites.length ? joursCites : proposees;
+  }
+
+  return [...new Set([...proposees, ...joursCites])].sort();
 }
 
 module.exports = { analyser, INTENTIONS, SCHEMA, prompt };

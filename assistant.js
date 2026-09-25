@@ -3,6 +3,7 @@ const { extrairePointage, extrairePlanning } = require("./extraction");
 const { publierRapport } = require("./publication");
 const { evaluerJournee } = require("./presence");
 const { localReportDate } = require("./database");
+const { inventaire, enFrancais: etatEnFrancais } = require("./inventaire");
 const {
   resoudreEmploye,
   enregistrerAbsence,
@@ -411,6 +412,49 @@ function lundiDeLaSemaine(iso) {
 }
 
 
+const JOURS = [
+  "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi",
+];
+
+const MOIS = [
+  "janvier", "février", "mars", "avril", "mai", "juin",
+  "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+];
+
+function nomDuJour(iso) {
+  const [annee, mois, jour] = iso.split("-").map(Number);
+  const d = new Date(Date.UTC(annee, mois - 1, jour));
+
+  return `${JOURS[d.getUTCDay()]} ${jour} ${MOIS[mois - 1]}`;
+}
+
+
+// Un constat, pas un document. Aucun appel au modele, aucune lecture de
+// fichier : on regarde ce qui est en base et on le dit.
+async function traiterEtat(dates, repondre) {
+  const journees = dates.length ? dates : [localReportDate()];
+
+  const etats = journees.map((date) =>
+    etatEnFrancais(inventaire(date), nomDuJour(date))
+  );
+
+  const manquantes = journees.filter((date) => {
+    const etat = inventaire(date);
+
+    return !etat.pieces.length && !etat.messages;
+  });
+
+  let message = etats.join("\n\n");
+
+  if (manquantes.length < journees.length) {
+    message +=
+      "\n\nDites-moi quelle journée produire, et je lance le rapport.";
+  }
+
+  await repondre(message);
+}
+
+
 async function traiterDemandeRapport(date, repondre, portee = "JOURNEE") {
   const hebdomadaire = portee === "SEMAINE";
 
@@ -481,6 +525,10 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
       if (analyse.acces) {
         await traiterAcces(analyse.acces, expediteur, repondre);
       }
+      return analyse;
+
+    case "ETAT":
+      await traiterEtat(analyse.etat_dates || [], repondre);
       return analyse;
 
     case "DEMANDE_RAPPORT":
