@@ -18,17 +18,7 @@ const { etatDesAttendus } = require("./attendus");
 // declencher un travail.
 // ---------------------------------------------------------------------------
 
-const TZ = process.env.DB_TZ_OFFSET || "+1 hours";
-
 const NUMERO = db.prepare(`SELECT number FROM report_numbers WHERE report_date = ?`);
-
-const EXPEDITEUR = db.prepare(`
-  SELECT COALESCE(u.name, m.sender_id) AS nom,
-         DATETIME(m.created_at, ?) AS heure
-  FROM messages m
-  LEFT JOIN users u ON u.open_id = m.sender_id
-  WHERE m.message_id = ?
-`);
 
 // Le texte deja extrait : sa presence dit que la piece est lisible, sans
 // avoir a la relire.
@@ -43,15 +33,20 @@ function inventaire(date) {
 
   const pieces = [];
 
+  // Un lot ne porte que ce que batch.js expose : {type, name, path} par piece,
+  // et sender/timestamp par message. Interroger un message_id ou un file_path
+  // ici ne ramenait rien -- toutes les pieces ressortaient "pas encore lu",
+  // expediteur "?", recues "null", alors que leur texte etait en base depuis
+  // l'arrivee. L'expediteur et l'heure sont deja dans le lot : on les lit la,
+  // sans requete.
   for (const message of batch.messages) {
     for (const piece of message.attachments) {
-      const info = EXPEDITEUR.get(TZ, message.message_id) || {};
-      const connu = piece.file_path ? TEXTE.get(piece.file_path) : null;
+      const connu = piece.path ? TEXTE.get(piece.path) : null;
 
       pieces.push({
         nom: piece.name || "(sans nom)",
-        expediteur: info.nom || "?",
-        recu: info.heure || null,
+        expediteur: message.sender.name || "?",
+        recu: message.timestamp || null,
         surLeDisque: !!(piece.path && fs.existsSync(piece.path)),
         lu: !!connu,
         moteur: connu ? connu.moteur : null,
