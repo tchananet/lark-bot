@@ -2,7 +2,8 @@ const { analyser } = require("./routeur");
 const { extrairePointage, extrairePlanning } = require("./extraction");
 const { publierRapport } = require("./publication");
 const { evaluerJournee } = require("./presence");
-const { localReportDate } = require("./database");
+const { localReportDate, texteConnu } = require("./database");
+const { generer } = require("./ia");
 const { inventaire, enFrancais: etatEnFrancais } = require("./inventaire");
 const {
   resoudreEmploye,
@@ -497,6 +498,63 @@ async function traiterDemandeRapport(date, repondre, portee = "JOURNEE") {
 }
 
 
+// Repondre au CONTENU, quand rien d'autre ne s'applique.
+//
+// Un document qui ne tombe dans aucune categorie connue ne declenchait rien :
+// la DRH envoyait une piece et recevait le silence. Or le texte est deja
+// extrait a l'arrivee et garde en base -- il ne coute donc rien de s'en
+// servir pour repondre.
+//
+// Le modele ne dispose que de ce qui est ecrit dans le document et dans le
+// message. Il n'a acces ni a la base RH, ni aux pointages, ni aux rapports :
+// une question sur ces sujets releve d'une autre intention, et il doit le
+// dire plutot que d'improviser.
+async function traiterConversation(texte, fichiers, repondre) {
+  const documents = [];
+
+  for (const chemin of fichiers) {
+    const connu = texteConnu(chemin);
+
+    if (connu) {
+      documents.push({
+        nom: require("path").basename(chemin),
+        texte: connu.texte.slice(0, 12000),
+      });
+    }
+  }
+
+  // Ni document lisible, ni question : le silence vaut mieux qu'un accuse de
+  // reception a chaque bonjour.
+  if (!documents.length && texte.trim().length < 15) {
+    return;
+  }
+
+  const consigne =
+    `Tu es l'assistant RH d'ALPHA MOTORS Cameroun. Tu reponds a la DRH dans\n` +
+    `une conversation, en francais, brievement et sans formule de politesse\n` +
+    `superflue.\n\n` +
+    `Tu ne disposes QUE du message ci-dessous et du contenu des documents\n` +
+    `joints. Tu n'as acces ni au registre du personnel, ni aux pointages, ni\n` +
+    `aux rapports deja produits. Si la question porte sur ces donnees, dis\n` +
+    `simplement que tu ne peux pas y repondre ici et invite a demander l'etat\n` +
+    `d'une journee ou un rapport.\n\n` +
+    `N'invente jamais un chiffre, un nom ou une date qui ne figure pas dans ce\n` +
+    `qui t'est fourni. Si le document ne dit rien du sujet demande, dis-le.\n\n` +
+    (documents.length
+      ? `DOCUMENTS JOINTS :\n${JSON.stringify(documents)}\n\n`
+      : "") +
+    `MESSAGE :\n${texte.trim() || "(aucun texte, seulement la piece jointe)"}`;
+
+  const { texte: reponse } = await generer({
+    tache: "RAPPORT",
+    temperature: 0.2,
+    messages: [{ role: "user", content: consigne }],
+  });
+
+  await repondre((reponse || "").trim() || "Je n'ai rien pu tirer de ce message.");
+}
+
+
 async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre }) {
   const analyse = await analyser({ texte, fichiers });
 
@@ -540,13 +598,27 @@ async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre })
       return analyse;
 
     case "RAPPORT":
-      // Le compte rendu est deja enregistre par la voie normale ; il sera
-      // repris dans le rapport consolide. Rien a repondre.
+      // Le compte rendu est deja enregistre par la voie normale et sera repris
+      // dans le rapport consolide. On accuse quand meme reception : la DRH a
+      // le droit de savoir que sa piece est arrivee et a ete lue.
+      await repondre(
+        `Compte rendu reçu et enregistré. Il sera repris dans le rapport ` +
+        `consolidé de la journée qu'il couvre.`
+      );
+      return analyse;
+
+    case "QUESTION":
+      await traiterConversation(texte, fichiers, repondre);
       return analyse;
 
     default:
-      // Salutations et messages sans objet : le silence vaut mieux qu'un
-      // accuse de reception a chaque phrase.
+      // Salutations et messages sans objet. On repond quand meme s il y a une
+      // piece jointe : un document envoye sans un mot merite mieux que le
+      // silence.
+      if (fichiers.length) {
+        await traiterConversation(texte, fichiers, repondre);
+      }
+
       return analyse;
   }
 }

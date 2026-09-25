@@ -17,6 +17,7 @@ const INTENTIONS = [
   "CORRECTION",
   "DEMANDE_RAPPORT",
   "ETAT",
+  "QUESTION",
   "GESTION_ACCES",
   "AUTRE",
 ];
@@ -114,21 +115,26 @@ CORRECTION : le message rectifie une heure lue sur la fiche de presence.
 DEMANDE_RAPPORT : le message reclame la PRODUCTION d'un rapport, d'une
   synthese ou d'un recapitulatif, pour une date donnee ou pour la derniere
   journee.
-ETAT : le message demande CE QUI EST DEJA DISPONIBLE, sans reclamer de
-  document. "Qu'est-ce que tu as pour lundi ?", "dis-moi ce qui est arrive
-  pour mardi", "quels services ont transmis cette semaine ?", "la fiche de
-  presence du 21 est-elle arrivee ?". La difference avec DEMANDE_RAPPORT
-  tient en un mot : ETAT demande un CONSTAT, DEMANDE_RAPPORT demande un
-  DOCUMENT. Dans le doute entre les deux, choisis ETAT : un constat coute
-  quelques secondes, un rapport coute plusieurs minutes et de l'argent.
-  Un message qui demande LES DEUX -- "je voudrais faire le rapport, dis-moi
-  d'abord ce que tu as" -- est un ETAT : on repond au constat, et
-  l'expediteur choisit ensuite la journee a produire.
+ETAT : le message demande QUELS DOCUMENTS SONT ARRIVES, ou ce qui manque
+  encore, pour une ou plusieurs journees. "Qu'est-ce que tu as pour lundi ?",
+  "quels services ont transmis ?", "la fiche de presence du 21 est-elle
+  arrivee ?". Il porte sur la COLLECTE, jamais sur le contenu des documents.
+  Un message qui demande a la fois l'etat et un rapport -- "je voudrais
+  faire le rapport, dis-moi d'abord ce que tu as" -- est un ETAT.
+QUESTION : l'expediteur pose une question a laquelle on repond en LISANT ce
+  qu'il a joint, ou en conversant simplement. "Le SAV est ouvert ce jour-la ?"
+  avec une note de service jointe, "qu'est-ce que dit ce document ?",
+  "resume-moi ca", "c'est quoi cette facture ?". Des qu'une piece jointe
+  accompagne une question et que cette piece n'est ni une fiche de presence,
+  ni un planning, ni un compte rendu d'activite, c'est une QUESTION.
+  Choisis QUESTION plutot qu'ETAT ou DEMANDE_RAPPORT chaque fois que la
+  reponse se trouve dans le document joint : ni l'un ni l'autre ne le lira.
 GESTION_ACCES : le message demande d habiliter quelqu un a dialoguer avec
   l assistant, de lui retirer cette habilitation, ou de savoir qui en
   dispose. Exemples : "ajoute Gloria aux RH", "Isabelle peut aussi utiliser
   le bot", "retire Ben des RH", "qui a acces au bot ?".
-AUTRE : tout le reste, y compris les salutations et les messages sans objet.
+AUTRE : les salutations et les messages qui n'attendent rien -- "bonjour",
+  "merci", "ok". Rien d'autre : une question, meme vague, est une QUESTION.
 
 NE CONFONDS PAS PERMISSION ET CORRECTION
 PERMISSION explique POURQUOI quelqu'un n'etait pas la ou est arrive tard.
