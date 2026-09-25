@@ -581,6 +581,12 @@ async function lirePiecesJointes(batch) {
   const ignorees = [];
   const usages = [];
 
+  // Le meme document est souvent transmis deux fois, par deux personnes : le
+  // compte rendu du Call Center du 21 est arrive de Mariah puis de la DRH.
+  // Sans ce garde-fou il est lu deux fois, compte deux fois, et signale deux
+  // fois dans le message.
+  const deja = new Set();
+
   for (const message of batch.messages) {
     for (const piece of message.attachments) {
       const nom = piece.name || path.basename(piece.path || "");
@@ -589,6 +595,12 @@ async function lirePiecesJointes(batch) {
         ignorees.push(`${nom} (fichier absent du disque)`);
         continue;
       }
+
+      if (deja.has(piece.path)) {
+        continue;
+      }
+
+      deja.add(piece.path);
 
       if (lues.length >= MAX_PIECES) {
         ignorees.push(`${nom} (au-dela de ${MAX_PIECES} pieces jointes)`);

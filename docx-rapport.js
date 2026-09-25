@@ -167,11 +167,10 @@ function corpsQuotidien(d) {
     ajouter(paragraphe(`• [${p.priorite}] ${p.intitule} — ${p.constat}`));
   }
 
-  // Ce qui n'est pas arrive est dit, jamais comble.
-  for (const manque of d.donnees_manquantes || []) {
-    ajouter(paragraphe(`• ${manque}`, { italique: true, couleur: "595959" }));
-  }
-
+  // Ce qui manque est signale a la DRH dans le message qui accompagne le
+  // fichier, jamais dans le document. Un rapport lu par la Direction
+  // Generale n'a pas a enumerer les comptes rendus qui ne sont pas arrives
+  // ni les pieces que le programme a ecartees : c'est de la cuisine interne.
   ajouter(paragraphe("", { apres: 160 }), titreSection("Actions prioritaires"));
 
   // Un intitule seul, sans une ligne dessous, se lit comme un defaut
@@ -288,11 +287,6 @@ function corpsHebdomadaire(d) {
     );
   } else {
     ajouter(paragraphe("Aucune priorité particulière retenue pour la semaine suivante."));
-  }
-
-  // Ce qui n'est pas arrive est dit, jamais comble.
-  for (const manque of d.donnees_manquantes || []) {
-    ajouter(paragraphe(`• ${manque}`, { italique: true, couleur: "595959" }));
   }
 
   ajouter(paragraphe("", { apres: 240 }), titreSection("Conclusion"));

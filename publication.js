@@ -109,10 +109,6 @@ function enTexte(d) {
     lignes.push(`  • [${p.priorite}] ${p.intitule} — ${p.constat}`);
   }
 
-  for (const manque of d.donnees_manquantes || []) {
-    lignes.push(`  • ${manque}`);
-  }
-
   lignes.push("", titre("Actions prioritaires"));
 
   if ((d.actions || []).length) {
@@ -189,10 +185,6 @@ function corpsTexteHebdomadaire(d) {
     lignes.push(`  ${i + 1}. ${p.action}  [${p.responsable}]`);
   });
 
-  for (const manque of d.donnees_manquantes || []) {
-    lignes.push(`  • ${manque}`);
-  }
-
   lignes.push("", titre("Conclusion"));
 
   for (const para of d.conclusion || []) {
@@ -248,8 +240,13 @@ async function publierRapport(options = {}) {
 
     // Une piece jointe ecartee est un compte rendu qui manque au rapport :
     // le groupe doit l'apprendre avec le rapport, pas dans les logs.
+    // Tout ce qui ne figure PLUS dans le document se retrouve ici : les
+    // comptes rendus attendus qui ne sont pas arrives, les pieces que le
+    // programme n'a pas su lire, et les defauts de validation. La DRH doit
+    // le savoir ; la Direction Generale n'a pas a le lire.
     const reserves = [
       ...resultat.erreurs,
+      ...(resultat.document.donnees_manquantes || []),
       ...(resultat.pieces_ignorees || []).map((piece) => `piece non lue : ${piece}`),
     ];
 
@@ -279,7 +276,10 @@ async function publierRapport(options = {}) {
       (hebdomadaire
         ? `Rapport hebdomadaire consolidé — ${resultat.document.titre_periode}`
         : `Rapport journalier consolidé — ${resultat.document.titre_date}`) +
-      (reserves.length ? `\n\nÀ vérifier : ${reserves.join(", ")}` : "")
+      (reserves.length
+        ? `\n\nÀ signaler, hors document :\n` +
+          reserves.map((r) => `• ${r}`).join("\n")
+        : "")
     );
 
     await envoyerFichier(chatId, resultat.chemin);
