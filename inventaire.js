@@ -3,6 +3,7 @@ const fs = require("fs");
 const { db } = require("./database");
 const { prepareDailyBatch } = require("./batch");
 const { faitsDePonctualite } = require("./presence");
+const { etatDesAttendus } = require("./attendus");
 
 // ---------------------------------------------------------------------------
 // Ce que le bot a REELLEMENT en main pour une journee
@@ -60,9 +61,11 @@ function inventaire(date) {
   }
 
   const numero = NUMERO.get(date);
+  const attendus = etatDesAttendus(date, batch.fenetre);
 
   return {
     date,
+    attendus,
     fenetre: batch.fenetre,
     messages: batch.total_messages,
     textes: batch.messages.filter((m) => (m.text || "").trim()).length,
@@ -106,6 +109,25 @@ function enFrancais(etat, nomDuJour) {
 
   if (etat.textes) {
     lignes.push(`  ${etat.textes} message(s) écrits directement dans la conversation.`);
+  }
+
+  // Le coeur de la reponse : ce qui manque, pas ce qui est la.
+  if (!etat.attendus.jourChome) {
+    if (etat.attendus.manquants.length) {
+      lignes.push(
+        `  MANQUE : ${etat.attendus.manquants.map((a) => a.libelle).join(", ")}.`
+      );
+    }
+
+    for (const partiel of etat.attendus.partiels) {
+      lignes.push(
+        `  ${partiel.libelle} : ${partiel.recu} document(s) sur ${partiel.quantite} attendus.`
+      );
+    }
+
+    if (!etat.attendus.manquants.length && !etat.attendus.partiels.length) {
+      lignes.push("  Tous les comptes rendus attendus sont arrivés.");
+    }
   }
 
   lignes.push(

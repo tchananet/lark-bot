@@ -7,6 +7,7 @@ const cron = require("node-cron");
 const Lark = require("@larksuiteoapi/node-sdk");
 const { traiter } = require("./assistant");
 const { publierRapport } = require("./publication");
+const { relancer } = require("./relance");
 const {
   saveMessage,
   saveAttachment,  saveUser,   claimMessage,
@@ -788,6 +789,33 @@ if (process.env.DIGEST_ENABLED === "false") {
 
   console.log(
     `Rapport quotidien planifie : ${DIGEST_CRON} (${DIGEST_TIMEZONE}), ` +
+    "portant sur la journee precedente"
+  );
+}
+
+
+// La relance du matin. Elle ne reclame rien aux services : elle dit a la DRH
+// ce qui manque, a elle de decider quoi en faire.
+const RELANCE_CRON = process.env.RELANCE_CRON || "0 10 * * *";
+
+if (process.env.RELANCE_ENABLED === "false") {
+  console.log("Relance du matin desactivee (RELANCE_ENABLED=false)");
+} else {
+  cron.schedule(
+    RELANCE_CRON,
+    () =>
+      relancer().catch((erreur) =>
+        console.error("[relance] planification :", erreur?.message || erreur)
+      ),
+    {
+      timezone: DIGEST_TIMEZONE,
+      name: "relance-matin",
+      noOverlap: true,
+    }
+  );
+
+  console.log(
+    `Relance du matin planifiee : ${RELANCE_CRON} (${DIGEST_TIMEZONE}), ` +
     "portant sur la journee precedente"
   );
 }
