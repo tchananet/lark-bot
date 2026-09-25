@@ -651,6 +651,12 @@ async function handleMessage(data) {
       fichiers: fichiersRecus.map((f) => path.basename(f)),
     };
 
+    // Lire AVANT de router. Le 25 septembre, une photo a fait echouer le
+    // routage et le message n a jamais ete lu : or le fichier etait la, et
+    // une lecture reussie vaut pour toujours. Ce qui est arrive doit etre
+    // conserve meme si la suite echoue.
+    await lireDesMaintenant(fichiersRecus);
+
     if (rh) {
       const texte =
         message.message_type === "text" ? parsedContent.text || "" : "";
@@ -721,8 +727,6 @@ async function handleMessage(data) {
         duree_ms: Date.now() - debutTraitement,
       });
     }
-
-    await lireDesMaintenant(fichiersRecus);
 
     console.log("\n========================");
     console.log("NOUVEAU MESSAGE");

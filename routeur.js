@@ -1,4 +1,4 @@
-const { genererJson, messageUtilisateur } = require("./ia");
+const { genererJson, messageAvecPages } = require("./ia");
 const { localToday } = require("./database");
 
 // ---------------------------------------------------------------------------
@@ -240,9 +240,18 @@ async function analyser({ texte = "", fichiers = [] } = {}) {
   const consigne = prompt(aujourdhui, fichiers.length > 0);
   const corps = texte.trim() ? `${consigne}\n\nMESSAGE RECU :\n${texte.trim()}` : consigne;
 
+  // Le modele de routage ne lit que du texte. Le 25 septembre, une photo de
+  // fiche de presence a fait echouer tout le traitement du message sur "No
+  // endpoints found that support image input" : le routage plantait, et avec
+  // lui l'enregistrement, la lecture et la reponse.
+  //
+  // Une piece jointe demande donc un modele qui sait la regarder. Il coute
+  // plus cher au millier de jetons, mais il n'est appele que sur les messages
+  // qui en portent une -- et le routage doit lire le CONTENU du document,
+  // jamais deviner d'apres son nom.
   const { donnees: analyse } = await genererJson({
-    tache: "ROUTAGE",
-    messages: [messageUtilisateur(corps, fichiers)],
+    tache: fichiers.length ? "VISION" : "ROUTAGE",
+    messages: [await messageAvecPages(corps, fichiers)],
     schema: SCHEMA,
     temperature: 0,
   });
