@@ -498,6 +498,55 @@ async function traiterDemandeRapport(date, repondre, portee = "JOURNEE") {
 }
 
 
+// Les faits dont la conversation a le droit de parler.
+//
+// Un modele a qui l'on ne donne rien ne repond pas "je ne sais pas" : il
+// comble. Interroge sur la ponctualite sans aucune piece jointe, il a cite un
+// "Rapport d'activite du 04/02/2025 (document joint)" qui n'existait pas, une
+// plainte de M. KENGNE et une demission de Mme TCHINDA -- trois personnes
+// inventees, dans un contexte RH.
+//
+// La consigne "n'invente jamais" ne suffit pas, on l'a deja vu avec les
+// absences fabriquees du 19 septembre. Le remede est le meme : ne jamais
+// l'interroger a vide. On lui remet les chiffres REELS des derniers jours,
+// calcules en base, et il n'a plus de vide a combler.
+function faitsRecents(jours = 7) {
+  const { inventaire } = require("./inventaire");
+
+  const releves = [];
+  let date = localReportDate();
+
+  for (let i = 0; i < jours; i++) {
+    const etat = inventaire(date);
+
+    releves.push({
+      journee: date,
+      documents_recus: etat.pieces.map((p) => p.nom),
+      services_manquants: (etat.attendus.manquants || []).map((a) => a.libelle),
+      fiche_de_presence: etat.fiche_recue ? "recue" : "non recue",
+      retards_non_justifies: etat.retards,
+      absences_non_justifiees: etat.absences,
+      rapport_produit: etat.rapport_numero ? `N° ${etat.rapport_numero}` : "non",
+    });
+
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    date = d.toISOString().slice(0, 10);
+  }
+
+  return releves;
+}
+
+
+// Un modele prive de document en invente un. Quand rien n'est joint, aucune
+// reponse ne peut s'appuyer sur "le document" : si elle le fait, elle est
+// fausse par construction et ne doit pas partir.
+function parleDUnDocumentAbsent(reponse) {
+  return /\b(document|piece|rapport)\s+(joint|ci-joint|transmis|fourni)|d['’]apr[eè]s\s+le\s+(document|rapport)/i
+    .test(reponse || "");
+}
+
+
 // Repondre au CONTENU, quand rien d'autre ne s'applique.
 //
 // Un document qui ne tombe dans aucune categorie connue ne declenchait rien :
@@ -505,10 +554,10 @@ async function traiterDemandeRapport(date, repondre, portee = "JOURNEE") {
 // extrait a l'arrivee et garde en base -- il ne coute donc rien de s'en
 // servir pour repondre.
 //
-// Le modele ne dispose que de ce qui est ecrit dans le document et dans le
-// message. Il n'a acces ni a la base RH, ni aux pointages, ni aux rapports :
-// une question sur ces sujets releve d'une autre intention, et il doit le
-// dire plutot que d'improviser.
+// Le modele ne dispose que du document joint, ou a defaut des releves
+// ci-dessus. Il n'a acces ni au registre du personnel, ni au detail des
+// pointages : une question sur ces sujets releve d'une autre intention, et il
+// doit le dire plutot que d'improviser.
 async function traiterConversation(texte, fichiers, repondre) {
   const documents = [];
 
@@ -529,20 +578,30 @@ async function traiterConversation(texte, fichiers, repondre) {
     return;
   }
 
+  const faits = documents.length ? null : faitsRecents();
+
   const consigne =
     `Tu es l'assistant RH d'ALPHA MOTORS Cameroun. Tu reponds a la DRH dans\n` +
     `une conversation, en francais, brievement et sans formule de politesse\n` +
     `superflue.\n\n` +
-    `Tu ne disposes QUE du message ci-dessous et du contenu des documents\n` +
-    `joints. Tu n'as acces ni au registre du personnel, ni aux pointages, ni\n` +
-    `aux rapports deja produits. Si la question porte sur ces donnees, dis\n` +
-    `simplement que tu ne peux pas y repondre ici et invite a demander l'etat\n` +
-    `d'une journee ou un rapport.\n\n` +
-    `N'invente jamais un chiffre, un nom ou une date qui ne figure pas dans ce\n` +
-    `qui t'est fourni. Si le document ne dit rien du sujet demande, dis-le.\n\n` +
+    `CE QUE TU SAIS, ET RIEN D'AUTRE\n` +
+    (documents.length
+      ? `Les documents joints ci-dessous, et le message.\n`
+      : `AUCUN DOCUMENT N'EST JOINT A CE MESSAGE. Ne parle donc jamais d'un\n` +
+        `document joint, d'un rapport transmis ou d'une piece fournie : il n'y\n` +
+        `en a pas. Tu disposes des RELEVES ci-dessous, calcules en base, et du\n` +
+        `message.\n`) +
+    `\nTu n'as acces a rien de plus : ni au registre du personnel, ni au detail\n` +
+    `des pointages, ni au texte des rapports. Si la question demande autre\n` +
+    `chose, dis-le franchement et propose de demander l'etat d'une journee ou\n` +
+    `un rapport.\n\n` +
+    `N'invente JAMAIS un nom, un chiffre, une date ou un incident. Si tu es\n` +
+    `tente de citer une personne, verifie qu'elle figure bien dans ce qui\n` +
+    `t'est fourni ; sinon ne la cite pas. Mieux vaut une reponse courte qui\n` +
+    `dit ne pas savoir qu'une reponse complete et fausse.\n\n` +
     (documents.length
       ? `DOCUMENTS JOINTS :\n${JSON.stringify(documents)}\n\n`
-      : "") +
+      : `RELEVES DES DERNIERS JOURS :\n${JSON.stringify(faits)}\n\n`) +
     `MESSAGE :\n${texte.trim() || "(aucun texte, seulement la piece jointe)"}`;
 
   const { texte: reponse } = await generer({
@@ -551,7 +610,26 @@ async function traiterConversation(texte, fichiers, repondre) {
     messages: [{ role: "user", content: consigne }],
   });
 
-  await repondre((reponse || "").trim() || "Je n'ai rien pu tirer de ce message.");
+  const propre = (reponse || "").trim();
+
+  // Dernier filet : sans piece jointe, une reponse qui s'appuie sur "le
+  // document" est fausse par construction. On prefere ne rien affirmer.
+  if (!documents.length && parleDUnDocumentAbsent(propre)) {
+    console.warn(
+      `[assistant] reponse ecartee, elle invoque un document absent : ` +
+      `${propre.slice(0, 120)}`
+    );
+
+    await repondre(
+      `Je n'ai pas de document sous les yeux pour répondre à cela, et je ne ` +
+      `veux rien avancer au hasard. Joignez la pièce concernée, ou demandez-moi ` +
+      `l'état d'une journée ou un rapport.`
+    );
+
+    return;
+  }
+
+  await repondre(propre || "Je n'ai rien pu tirer de ce message.");
 }
 
 
