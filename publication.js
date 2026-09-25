@@ -6,6 +6,7 @@ const Lark = require("@larksuiteoapi/node-sdk");
 
 const { produireQuotidien, produireHebdomadaire } = require("./rapport");
 const { localReportDate } = require("./database");
+const { questionsPourLeRapport } = require("./arbitrage");
 
 // ---------------------------------------------------------------------------
 // Production et publication du rapport
@@ -217,6 +218,28 @@ async function publierRapport(options = {}) {
       : `[rapport] Preparation du rapport du ${date}`
   );
 
+  // Un chiffre d'absences non justifiees ne part pas a la Direction Generale
+  // sans que la DRH l'ait vu et confirme. Une fiche de presence ne dit ni les
+  // permanences, ni les conges poses la veille, ni les missions : une case
+  // vide y ressemble trait pour trait a une absence.
+  if (!hebdomadaire) {
+    const attente = questionsPourLeRapport(date);
+
+    if (attente.questions.length) {
+      console.log(
+        `[rapport] ${date} : ${attente.questions.length} absence(s) a confirmer, ` +
+        `rapport suspendu.`
+      );
+
+      return {
+        statut: "en_attente",
+        date,
+        questions: attente.questions,
+        message: attente.message,
+      };
+    }
+  }
+
   try {
     const resultat = hebdomadaire
       ? await produireHebdomadaire(date, DOSSIER)
@@ -246,6 +269,7 @@ async function publierRapport(options = {}) {
     // le savoir ; la Direction Generale n'a pas a le lire.
     const reserves = [
       ...resultat.erreurs,
+      ...(resultat.notes_drh || []),
       ...(resultat.document.donnees_manquantes || []),
       ...(resultat.pieces_ignorees || []).map((piece) => `piece non lue : ${piece}`),
     ];

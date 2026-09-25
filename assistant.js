@@ -1,7 +1,13 @@
 const { analyser } = require("./routeur");
 const { extrairePointage, extrairePlanning } = require("./extraction");
 const { publierRapport } = require("./publication");
-const { evaluerJournee } = require("./presence");
+const { evaluerJournee, faitsDePonctualite } = require("./presence");
+const {
+  questionsPourLeRapport,
+  questionsOuvertes,
+  journeeEnAttente,
+  trancher,
+} = require("./arbitrage");
 const { localReportDate, texteConnu } = require("./database");
 const { generer } = require("./ia");
 const { inventaire, enFrancais: etatEnFrancais } = require("./inventaire");
@@ -485,12 +491,161 @@ async function traiterEtat(dates, repondre) {
 }
 
 
+// Demander avant de conclure a une absence.
+//
+// Une fiche de presence ne dit pas tout : ni les permanences, ni les conges
+// poses la veille, ni les missions. Une case vide y ressemble trait pour
+// trait a une absence, et le rapport du 24 septembre en annoncait six sur
+// vingt-trois -- un chiffre qui part a la Direction Generale et que la fiche
+// seule ne permet pas d'affirmer.
+//
+// Le programme ne peut pas trancher : l'information n'est nulle part dans ce
+// qu'il detient. Il s'arrete donc et demande. Une fois la journee tranchee,
+// elle ne redemande plus rien.
+const LIBELLES_STATUT = {
+  ABSENT: "absence confirmée",
+  PERMISSION: "permission",
+  CONGE: "congé",
+  MISSION: "mission",
+  MALADIE: "arrêt maladie",
+  FORMATION: "formation",
+  PERMANENCE: "permanence",
+  TELETRAVAIL: "télétravail",
+};
+
+// Les statuts qui valent justification : ils s'inscrivent au registre des
+// absences. ABSENT ferme la question sans rien inscrire, et PERMANENCE comme
+// TELETRAVAIL ne sont pas des absences du tout.
+const JUSTIFICATIFS = new Set([
+  "PERMISSION", "CONGE", "MISSION", "MALADIE", "FORMATION",
+]);
+
+
+
+// Lire la reponse de la DRH, sans jamais deborder de la question posee.
+//
+// Le modele ne peut se prononcer que sur les noms deja en attente : il ne
+// peut ni en ajouter, ni toucher une autre journee. S'il ne reconnait aucune
+// reponse, le message repart vers le routage normal -- la DRH a le droit de
+// parler d'autre chose pendant qu'une question est ouverte.
+async function lireReponseAbsences(texte, expediteur, repondre) {
+  const date = journeeEnAttente();
+
+  if (!date || !texte.trim()) {
+    return false;
+  }
+
+  const ouvertes = questionsOuvertes(date);
+
+  if (!ouvertes.length) {
+    return false;
+  }
+
+  const consigne =
+    `La DRH a ete interrogee sur des personnes sans pointage ni justificatif ` +
+    `pour la journee du ${date}. Voici la question posee, puis sa reponse.\n\n` +
+    `PERSONNES EN ATTENTE :\n${ouvertes.map((q) => q.nom).join("\n")}\n\n` +
+    `REPONSE :\n${texte.trim()}\n\n` +
+    `Pour CHACUNE des personnes ci-dessus, donne le statut que la reponse lui ` +
+    `attribue. Statuts possibles : ABSENT, PERMISSION, CONGE, MISSION, ` +
+    `MALADIE, FORMATION, PERMANENCE, TELETRAVAIL, ou INCONNU si la reponse ne ` +
+    `dit rien de cette personne.\n` +
+    `Une formule comme "les autres sont absents" ou "le reste absent" ` +
+    `s'applique a toutes celles que la reponse n'a pas nommees.\n` +
+    `Si le message ne repond pas du tout a la question, mets INCONNU partout.\n` +
+    `N'ajoute aucun nom qui ne figure pas dans la liste.\n\n` +
+    `Reponds en JSON strict : ` +
+    `{"reponses":[{"nom":"...","statut":"...","motif":"..."}]}`;
+
+  let brut;
+
+  try {
+    const { texte: json } = await generer({
+      tache: "ROUTAGE",
+      temperature: 0,
+      messages: [{ role: "user", content: consigne }],
+    });
+
+    brut = JSON.parse((json || "").replace(/^\s*```(json)?|```\s*$/g, "").trim());
+  } catch (erreur) {
+    console.warn(`[assistant] reponse absences illisible : ${erreur.message}`);
+
+    return false;
+  }
+
+  const attendus = new Map(ouvertes.map((q) => [q.nom, q]));
+  const tranchees = [];
+
+  for (const reponse of brut.reponses || []) {
+    // Un nom hors de la question est ignore : le modele n'a pas le droit
+    // d'elargir ce qui lui a ete soumis.
+    if (!attendus.has(reponse.nom) || reponse.statut === "INCONNU") {
+      continue;
+    }
+
+    if (!LIBELLES_STATUT[reponse.statut]) {
+      continue;
+    }
+
+    trancher(date, reponse.nom, reponse.statut, reponse.motif || null);
+
+    // Un justificatif s'inscrit au registre : il vaudra pour le rapport, et
+    // pour tous ceux qui relisent cette journee ensuite.
+    if (JUSTIFICATIFS.has(reponse.statut)) {
+      const { employe } = resoudreEmploye(reponse.nom);
+
+      if (employe) {
+        enregistrerAbsence({
+          employee_id: employe.id,
+          type: reponse.statut,
+          date_debut: date,
+          date_fin: date,
+          motif: reponse.motif || null,
+          declare_par: expediteur.nom || expediteur.open_id || "RH",
+        });
+      }
+    }
+
+    tranchees.push(`${reponse.nom} : ${LIBELLES_STATUT[reponse.statut]}`);
+  }
+
+  // Aucune personne reconnue : le message parlait d'autre chose.
+  if (!tranchees.length) {
+    return false;
+  }
+
+  const restantes = questionsOuvertes(date);
+
+  await repondre(
+    `C'est noté pour le ${date} :\n${tranchees.map((t) => `• ${t}`).join("\n")}` +
+    (restantes.length
+      ? `\n\nIl reste à trancher : ${restantes.map((r) => r.nom).join(", ")}.`
+      : `\n\nTout est tranché. Demande-moi le rapport du ${date} quand tu veux.`)
+  );
+
+  return true;
+}
+
+
 async function traiterDemandeRapport(date, repondre, portee = "JOURNEE") {
   const hebdomadaire = portee === "SEMAINE";
 
   const cible = hebdomadaire
     ? lundiDeLaSemaine(date || localReportDate())
     : date || localReportDate();
+
+  // La question se pose AVANT d'annoncer une generation : il serait absurde
+  // de dire "rapport en cours" pour repondre ensuite qu'il n'a pas commence.
+  // Le meme garde existe dans publierRapport, qui couvre le cron ; celui-ci
+  // ne sert qu'a repondre dans le bon ordre.
+  if (!hebdomadaire) {
+    const attente = questionsPourLeRapport(cible);
+
+    if (attente.questions.length) {
+      await repondre(attente.message);
+      return;
+    }
+  }
 
   await repondre(
     hebdomadaire
@@ -500,6 +655,12 @@ async function traiterDemandeRapport(date, repondre, portee = "JOURNEE") {
   );
 
   const resultat = await publierRapport({ date: cible, portee });
+
+  // Filet : si la question s'est ouverte entre-temps, rien ne part.
+  if (resultat.statut === "en_attente") {
+    await repondre(resultat.message);
+    return;
+  }
 
   if (resultat.statut === "vide") {
     await repondre(
@@ -663,6 +824,14 @@ async function traiterConversation(texte, fichiers, repondre) {
 
 
 async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre }) {
+  // Une question posee attend sa reponse : on la lit avant de router, sans
+  // quoi "Isabelle est en permanence" partirait en declaration d'absence et
+  // la question resterait ouverte. Si le message ne repond a rien, il suit
+  // son chemin normal.
+  if (await lireReponseAbsences(texte, expediteur, repondre)) {
+    return { intention: "REPONSE_ABSENCES", certitude: "HAUTE" };
+  }
+
   const analyse = await analyser({ texte, fichiers });
 
   console.log(

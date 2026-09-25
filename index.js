@@ -790,10 +790,53 @@ if (process.env.DIGEST_ENABLED === "false") {
 } else {
   // publierRapport signale lui-meme ses echecs dans Lark ; ce filet ne
   // couvre que ce qui casse avant, par exemple une configuration absente.
-  const lancerRapport = () =>
-    publierRapport().catch((erreur) =>
-      console.error("[rapport] planification :", erreur?.message || erreur)
-    );
+  // Le rapport de 17h15 part dans le groupe sans que personne ne le relise.
+  // C'est precisement le cas ou une absence supposee ne doit pas passer :
+  // publierRapport s'arrete alors et rend la question, qu'on adresse a la
+  // DRH seule. Le rapport repartira quand elle aura repondu.
+  const lancerRapport = async () => {
+    try {
+      const resultat = await publierRapport();
+
+      if (resultat?.statut !== "en_attente") {
+        return;
+      }
+
+      const { comptesRH } = require("./relance");
+      const destinataires = comptesRH();
+
+      if (!destinataires.length) {
+        console.warn(
+          "[rapport] absences a confirmer, mais aucun compte RH connu : " +
+          "personne n'a ete prevenu."
+        );
+
+        return;
+      }
+
+      for (const openId of destinataires) {
+        try {
+          await client.im.v1.message.create({
+            params: { receive_id_type: "open_id" },
+            data: {
+              receive_id: openId,
+              msg_type: "text",
+              content: JSON.stringify({ text: resultat.message }),
+            },
+          });
+        } catch (erreur) {
+          console.error(`[rapport] envoi impossible a ${openId} :`, erreur.message);
+        }
+      }
+
+      console.log(
+        `[rapport] ${resultat.date} : question posee a ${destinataires.length} ` +
+        `compte(s) RH, rapport en attente.`
+      );
+    } catch (erreur) {
+      console.error("[rapport] planification :", erreur?.message || erreur);
+    }
+  };
 
   cron.schedule(DIGEST_CRON, lancerRapport, {
     timezone: DIGEST_TIMEZONE,

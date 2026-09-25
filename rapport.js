@@ -181,7 +181,11 @@ services : un element par service ayant transmis, dans cet ordre lorsqu'ils
   d'activites, chaque ligne porte un libelle EN MAJUSCULES, une description
   factuelle, et suite vide. Pour le Service Apres-Vente, libelle est le nom du
   client et suite l'action attendue.
-points_attention : priorite HAUTE, MOYENNE ou BASSE.
+points_attention : priorite HAUTE, MOYENNE ou BASSE. Ce sont des faits
+  d'exploitation qui interessent la Direction Generale. N'y mets JAMAIS de
+  remarque d'intendance sur la tenue de la fiche de presence : signatures
+  manquantes, cases non remplies, ecriture illisible. Cela ne se rapporte pas
+  a l'activite de l'entreprise.
 actions : une entree par service concerne.
 conclusion : deux ou trois paragraphes. Volume d'activite, ce qui a ete
   concretise ou non, ce qui reste en suspens.
@@ -282,6 +286,35 @@ function civilitesInventees(attendus, texte) {
   }
 
   return [...fautives];
+}
+
+
+// Ce qui regarde la DRH, et ce qui regarde la Direction Generale.
+//
+// Le rapport sortait des points d'attention du genre "[BASSE] Suivi des
+// signatures -- les heures de depart de trois collaborateurs ne sont pas
+// signees". C'est une remarque d'intendance : elle n'a pas sa place dans un
+// document qui monte a la Direction Generale, mais la DRH doit la recevoir.
+//
+// Elle part donc dans les reserves, le canal qui existe deja pour tout ce qui
+// est retire du document sans etre perdu.
+const INTENDANCE = /signature|parafe|paraphe|case (vide|non remplie)|illisible sur la fiche/i;
+
+function trierPointsAttention(points = []) {
+  const retenus = [];
+  const notes = [];
+
+  for (const point of points) {
+    const texte = `${point.intitule || ""} ${point.constat || ""}`;
+
+    if (INTENDANCE.test(texte)) {
+      notes.push(`${point.intitule} — ${point.constat}`);
+    } else {
+      retenus.push(point);
+    }
+  }
+
+  return { retenus, notes };
 }
 
 
@@ -973,6 +1006,10 @@ async function construireQuotidien(date) {
     erreurs = valider(donnees, "QUOTIDIEN", ponctualite);
   }
 
+  const { retenus, notes } = trierPointsAttention(donnees.points_attention);
+
+  donnees.points_attention = retenus;
+
   const numero = allocateReportNumber(date);
 
   // Une piece que le programme n'a pas su lire doit figurer DANS le document,
@@ -994,6 +1031,7 @@ async function construireQuotidien(date) {
   return {
     statut: erreurs.length ? "defauts" : "ok",
     erreurs,
+    notes_drh: notes,
     pieces_ignorees: pieces.ignorees,
     cout_pieces: pieces.cout,
     usage,
