@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node modules.test.js && node presence.test.js && node inventaire.test.js && node garde.test.js && node arbitrage.test.js",
+    "test": "node modules.test.js && node presence.test.js && node inventaire.test.js && node garde.test.js && node arbitrage.test.js && node pages.test.js",
     "start": "node index.js",
     "import-employes": "node import-employes.js",
     "rapport": "node publication.js",

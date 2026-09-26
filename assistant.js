@@ -1,5 +1,5 @@
 const { analyser } = require("./routeur");
-const { extrairePointage, extrairePlanning } = require("./extraction");
+const { extrairePointageLot, extrairePlanning } = require("./extraction");
 const { publierRapport } = require("./publication");
 const { evaluerJournee, faitsDePonctualite } = require("./presence");
 const {
@@ -60,46 +60,76 @@ function resumeQuestions(date) {
 }
 
 
+// Une fiche, meme en plusieurs pages, est une seule fiche.
+//
+// Chaque image etait lue comme un document independant, qui se datait sur son
+// propre en-tete. Or une fiche de presence tient rarement sur une page, et la
+// suite ne reprend pas l'en-tete : le modele n'y trouvait aucune date, en
+// devinait une, et la journee se retrouvait coupee en deux -- la moitie des
+// gens sur un jour, l'autre moitie sur le jour voisin, et tout le monde
+// absent de part et d'autre.
+//
+// Des pages envoyees dans le meme message sont la suite les unes des autres.
+// Elles partagent donc la journee de la premiere, celle qui porte l'en-tete.
+// La date retenue est annoncee : c'est une deduction, elle doit se voir.
 async function traiterPointage(fichiers, repondre) {
-  for (const chemin of fichiers) {
-    await repondre("Fiche de presence recue, lecture en cours. Cela prend quelques minutes.");
-
-    const resultat = await extrairePointage(chemin);
-
-    if (!resultat.dates.length) {
-      await repondre("Aucune journee exploitable n'a pu etre lue sur cette fiche.");
-      continue;
-    }
-
-    let message =
-      `Fiche lue : ${resultat.dates.join(", ")}.\n` +
-      `${resultat.enregistres} pointage(s) enregistre(s).`;
-
-    // Normalement deux moteurs se relisent l'un l'autre. Quand l'un tombe,
-    // la fiche passe quand meme, mais sans ce filet : autant le dire.
-    if (resultat.moteur_unique) {
-      message +=
-        `\n\nAttention : un seul moteur de lecture a repondu ` +
-        `(${resultat.moteur_unique}). Les heures n'ont pas ete recoupees, ` +
-        `verifiez-les sur la fiche papier.`;
-    }
-
-    if (resultat.en_revue) {
-      message +=
-        `\n${resultat.en_revue} cellule(s) illisible(s), laissee(s) de cote ` +
-        `plutot que devinee(s) :\n` +
-        resultat.divergences
-          .slice(0, 8)
-          .map((d) => `- ${d.date} ${d.nom_brut || ""} : ${d.motif}`)
-          .join("\n");
-    }
-
-    for (const date of resultat.dates) {
-      message += resumeQuestions(date);
-    }
-
-    await repondre(message);
+  if (!fichiers.length) {
+    return;
   }
+
+  await repondre(
+    fichiers.length > 1
+      ? `Fiche de présence reçue, ${fichiers.length} pages. Lecture en cours, ` +
+        `cela prend quelques minutes.`
+      : "Fiche de présence reçue, lecture en cours. Cela prend quelques minutes."
+  );
+
+  const resultat = await extrairePointageLot(fichiers);
+
+  if (!resultat.dates.length) {
+    await repondre("Aucune journée exploitable n'a pu être lue sur cette fiche.");
+    return;
+  }
+
+  let message =
+    `Fiche lue : ${resultat.dates.join(", ")}` +
+    (resultat.pages > 1 ? ` (${resultat.pages} pages)` : "") +
+    `.\n${resultat.enregistres} pointage(s) enregistré(s).`;
+
+  // La deduction se dit. Si elle est fausse -- deux journees envoyees dans un
+  // seul message -- la DRH doit pouvoir s'en apercevoir et renvoyer separement.
+  if (resultat.dates_ecartees.length) {
+    message +=
+      `\n\nLes pages d'un même envoi couvrent la même journée : ` +
+      `${resultat.dates_ecartees.join(", ")} a été ramené au ` +
+      `${resultat.dates[0]}. Si ce sont bien deux journées différentes, ` +
+      `envoyez-les séparément.`;
+  }
+
+  // Normalement deux moteurs se relisent l'un l'autre. Quand l'un tombe,
+  // la fiche passe quand meme, mais sans ce filet : autant le dire.
+  if (resultat.moteur_unique) {
+    message +=
+      `\n\nAttention : un seul moteur de lecture a répondu ` +
+      `(${resultat.moteur_unique}). Les heures n'ont pas été recoupées, ` +
+      `vérifiez-les sur la fiche papier.`;
+  }
+
+  if (resultat.en_revue) {
+    message +=
+      `\n${resultat.en_revue} cellule(s) illisible(s), laissée(s) de côté ` +
+      `plutôt que devinée(s) :\n` +
+      resultat.divergences
+        .slice(0, 8)
+        .map((d) => `- ${d.date} ${d.nom_brut || ""} : ${d.motif}`)
+        .join("\n");
+  }
+
+  for (const date of resultat.dates) {
+    message += resumeQuestions(date);
+  }
+
+  await repondre(message);
 }
 
 

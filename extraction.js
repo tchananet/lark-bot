@@ -229,8 +229,7 @@ function confronter(passeA, passeB) {
 }
 
 
-async function extrairePointage(chemin, options = {}) {
-  const documentId = options.documentId || null;
+async function lirePages(chemin) {
 
   // Deux MOTEURS differents, pas deux passes du meme modele : deux lectures
   // d'un meme modele partagent les memes angles morts et se trompent
@@ -267,6 +266,7 @@ async function extrairePointage(chemin, options = {}) {
     throw new Error(`Aucun moteur n'a pu lire la fiche. ${echecs.join(" ; ")}`);
   }
 
+
   let moteurUnique = null;
   let retenus;
   let divergences;
@@ -284,6 +284,13 @@ async function extrairePointage(chemin, options = {}) {
     );
   }
 
+  return { retenus, divergences, moteurUnique };
+}
+
+
+// Ecrire ce qui a ete lu. Separe de la lecture pour qu'un envoi de plusieurs
+// pages puisse etre recadre sur une seule journee avant la moindre ecriture.
+function enregistrerLecture({ retenus, divergences, moteurUnique, documentId }) {
   let enregistres = 0;
   let vides = 0;
   const enRevue = [...divergences];
@@ -339,6 +346,123 @@ async function extrairePointage(chemin, options = {}) {
     en_revue: enRevue.length,
     divergences: enRevue,
     moteur_unique: moteurUnique,
+  };
+}
+
+
+async function extrairePointage(chemin, options = {}) {
+  const lecture = await lirePages(chemin);
+
+  return enregistrerLecture({
+    ...lecture,
+    documentId: options.documentId || null,
+  });
+}
+
+
+// La date qui revient le plus souvent sur une page. Une fiche papier en porte
+// une seule ; si les deux moteurs ont lu deux en-tetes differents, la plus
+// representee est la bonne.
+function dateDominante(lignes) {
+  const comptes = new Map();
+
+  for (const ligne of lignes) {
+    comptes.set(ligne.date, (comptes.get(ligne.date) || 0) + 1);
+  }
+
+  let meilleure = null;
+  let record = 0;
+
+  for (const [date, compte] of comptes) {
+    if (compte > record) {
+      meilleure = date;
+      record = compte;
+    }
+  }
+
+  return meilleure;
+}
+
+
+// Ramener les pages d'un meme envoi sur une seule journee.
+//
+// La reference est la date de la premiere page qui a livre des lignes :
+// c'est elle qui porte l'en-tete. Les suivantes en heritent.
+function ramenerALaMemeJournee(lectures) {
+  const porteuse = lectures.find((lecture) => lecture.retenus.length);
+  const reference = porteuse ? dateDominante(porteuse.retenus) : null;
+
+  const ecartees = new Set();
+
+  if (!reference) {
+    return { reference: null, ecartees: [] };
+  }
+
+  for (const lecture of lectures) {
+    for (const ligne of lecture.retenus) {
+      if (ligne.date !== reference) {
+        ecartees.add(ligne.date);
+        ligne.date = reference;
+      }
+    }
+
+    for (const divergence of lecture.divergences || []) {
+      if (divergence.date && divergence.date !== reference) {
+        ecartees.add(divergence.date);
+        divergence.date = reference;
+      }
+    }
+  }
+
+  return { reference, ecartees: [...ecartees] };
+}
+
+
+// Plusieurs images dans un seul message : une seule fiche.
+//
+// Une fiche de presence tient rarement sur une page. La suite ne reprend pas
+// l'en-tete : le modele n'y trouve aucune date, en devine une, et la journee
+// se retrouve coupee en deux -- la moitie des gens sur un jour, l'autre
+// moitie sur un jour voisin, tous absents de part et d'autre.
+//
+// Des pages envoyees ensemble sont la meme fiche. Elles couvrent donc la
+// meme journee, celle que porte la premiere page : c'est elle qui a l'en-tete.
+// Les autres en heritent, et l'on dit franchement laquelle a ete retenue.
+//
+// Pour envoyer deux journees differentes, il faut deux messages.
+async function extrairePointageLot(chemins, options = {}) {
+  if (chemins.length <= 1) {
+    const seul = await extrairePointage(chemins[0], options);
+
+    return { ...seul, pages: 1, dates_ecartees: [] };
+  }
+
+  const lectures = [];
+
+  for (const chemin of chemins) {
+    lectures.push(await lirePages(chemin));
+  }
+
+  const { reference, ecartees } = ramenerALaMemeJournee(lectures);
+
+  const resultat = enregistrerLecture({
+    retenus: lectures.flatMap((lecture) => lecture.retenus),
+    divergences: lectures.flatMap((lecture) => lecture.divergences),
+    moteurUnique: lectures.find((lecture) => lecture.moteurUnique)?.moteurUnique || null,
+    documentId: options.documentId || null,
+  });
+
+  if (ecartees.length) {
+    console.log(
+      `[extraction] ${chemins.length} pages d'un meme envoi ramenees au ` +
+      `${reference} (dates ecartees : ${ecartees.join(", ")}).`
+    );
+  }
+
+  return {
+    ...resultat,
+    pages: chemins.length,
+    dates_ecartees: ecartees,
   };
 }
 
@@ -469,6 +593,10 @@ async function classerDocument(chemin) {
 
 module.exports = {
   extrairePointage,
+  extrairePointageLot,
+  ramenerALaMemeJournee,
+  lirePages,
+  enregistrerLecture,
   extrairePlanning,
   classerDocument,
   confronter,
