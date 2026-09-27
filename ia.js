@@ -17,6 +17,12 @@ const path = require("path");
 //                           4.7-flash ecrivait cinq fois plus de tokens pour
 //                           le meme document, donc coutait plus cher malgre
 //                           un prix au token inferieur.
+//   CONVERSATION  deepseek-v3.2  le meme que RAPPORT, choisi pour sa tenue
+//                           dans un enchainement d'appels d'outils : il faut
+//                           savoir s'arreter et REPONDRE, pas seulement agir.
+//                           C'est exactement ce qui manquait a mistral-nemo,
+//                           qui rangeait une question dans une case et
+//                           declenchait un rapport.
 //   VISION   gemini-2.5-flash-lite  19 heures d'arrivee sur 21 sur la fiche
 //                           manuscrite reelle, en 7 s pour 0,0005 $. Mesure
 //                           contre quatre concurrents : qwen3.7-flash 18/21
@@ -32,6 +38,8 @@ const MODELES = {
   ROUTAGE: process.env.IA_MODELE_ROUTAGE || "mistralai/mistral-nemo",
   RAPPORT: process.env.IA_MODELE_RAPPORT || "deepseek/deepseek-v3.2",
   VISION: process.env.IA_MODELE_VISION || "google/gemini-2.5-flash-lite",
+  CONVERSATION:
+    process.env.IA_MODELE_CONVERSATION || "deepseek/deepseek-v3.2",
 };
 
 const TIMEOUTS = {
@@ -40,6 +48,7 @@ const TIMEOUTS = {
   // La lecture d'un scan de plusieurs Mo est lente : OpenRouter analyse le
   // PDF avant meme d'appeler le modele.
   VISION: Number(process.env.IA_TIMEOUT_VISION || 300000),
+  CONVERSATION: Number(process.env.IA_TIMEOUT_CONVERSATION || 120000),
 };
 
 const TENTATIVES = Number(process.env.IA_TENTATIVES || 4);
@@ -144,6 +153,11 @@ async function generer(options) {
     schema = null,
     temperature = 0,
     modele = null,
+
+    // Les outils que le modele a le droit d'appeler. Leur simple presence
+    // change la nature de l'echange : il peut demander un renseignement au
+    // lieu de repondre de memoire -- ou d'inventer.
+    outils = null,
   } = options;
 
   const requete = {
@@ -151,6 +165,7 @@ async function generer(options) {
     temperature,
     messages,
     usage: { include: true },
+    ...(outils && outils.length ? { tools: outils, tool_choice: "auto" } : {}),
     ...(schema
       ? {
           response_format: {
@@ -168,9 +183,17 @@ async function generer(options) {
   for (let essai = 1; essai <= TENTATIVES; essai++) {
     try {
       const corps = await appeler(requete, tache);
+      const message = corps.choices?.[0]?.message || {};
 
       return {
-        texte: corps.choices?.[0]?.message?.content || "",
+        texte: message.content || "",
+
+        // Les outils que le modele demande a executer. Le message complet est
+        // rendu tel quel : il doit etre reinjecte a l'identique dans le fil,
+        // sans quoi le modele ne reconnait pas les resultats qu'on lui rend.
+        appels: message.tool_calls || [],
+        message,
+
         usage: corps.usage || {},
         modele: requete.model,
       };

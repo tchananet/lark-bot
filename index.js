@@ -676,6 +676,11 @@ async function handleMessage(data) {
           texte: texteRecu,
           fichiers: fichiersRecus,
           expediteur,
+
+          // Le fil de conversation est tenu par salon : deux echanges
+          // paralleles ne doivent pas se melanger.
+          chatId: message.chat_id,
+
           repondre: (reponse) => sendTextToChat(message.chat_id, reponse),
         });
 

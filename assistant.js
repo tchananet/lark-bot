@@ -1,4 +1,5 @@
 const { analyser } = require("./routeur");
+const { repondre: repondreEnAgent } = require("./agent");
 const { extrairePointageLot, extrairePlanning } = require("./extraction");
 const { publierRapport } = require("./publication");
 const { evaluerJournee, faitsDePonctualite } = require("./presence");
@@ -853,13 +854,50 @@ async function traiterConversation(texte, fichiers, repondre) {
 }
 
 
-async function traiter({ texte = "", fichiers = [], expediteur = {}, repondre }) {
+// L'agent prend la conversation, l'aiguillage garde les documents.
+//
+// Tant qu'il ne sait pas produire ni publier un rapport, l'agent ne peut pas
+// remplacer l'aiguillage sans retirer une capacite a la DRH. D'ou cet
+// interrupteur : il permet de l'essayer pour de vrai dans Lark sans rien
+// perdre, et disparaitra quand les outils d'ecriture existeront.
+//
+// Les pieces jointes ne passent jamais par lui : une fiche de presence doit
+// toujours traverser les deux moteurs et leur confrontation.
+const AGENT_ACTIF = process.env.AGENT_CONVERSATION === "true";
+
+
+async function traiter({
+  texte = "",
+  fichiers = [],
+  expediteur = {},
+  repondre,
+  chatId = null,
+}) {
   // Une question posee attend sa reponse : on la lit avant de router, sans
   // quoi "Isabelle est en permanence" partirait en declaration d'absence et
   // la question resterait ouverte. Si le message ne repond a rien, il suit
   // son chemin normal.
   if (await lireReponseAbsences(texte, expediteur, repondre)) {
     return { intention: "REPONSE_ABSENCES", certitude: "HAUTE" };
+  }
+
+  // Un message ecrit, sans piece jointe, est une conversation : aucune
+  // raison de le ranger dans une case avant de l'avoir lu.
+  if (AGENT_ACTIF && !fichiers.length && texte.trim()) {
+    const resultat = await repondreEnAgent({
+      chatId: chatId || expediteur.open_id || "sans-fil",
+      texte,
+    });
+
+    console.log(
+      `[agent] ${resultat.tours} tour(s), ` +
+      `outils : ${resultat.outils.map((o) => o.nom).join(", ") || "aucun"}, ` +
+      `${resultat.usage.prompt_tokens}+${resultat.usage.completion_tokens} tokens`
+    );
+
+    await repondre(resultat.texte || "Je n'ai rien pu tirer de ce message.");
+
+    return { intention: "CONVERSATION", certitude: "HAUTE", agent: true };
   }
 
   const analyse = await analyser({ texte, fichiers });

@@ -89,6 +89,17 @@ const OUTILS = [
         // complet : le dire évite d'en produire un qui se plaindra lui-même
         // de journées manquantes.
         semaine_en_cours_terminee: decalerJours(lundi, 6) < today,
+
+        // Dire le nombre de jours restants plutot que de laisser deduire :
+        // interroge un dimanche, le modele a annonce que la semaine se
+        // terminait "demain" alors qu elle se terminait le jour meme.
+        jours_restants_dans_la_semaine: Math.max(
+          0,
+          Math.round(
+            (new Date(decalerJours(lundi, 6) + "T00:00:00Z") -
+              new Date(today + "T00:00:00Z")) / 86400000
+          )
+        ),
       };
     },
   },
