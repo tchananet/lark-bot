@@ -1364,12 +1364,14 @@ async function construireHebdomadaire(debut) {
   return {
     statut: erreurs.length ? "defauts" : "ok",
     erreurs,
-    pieces_ignorees: [
-      ...ignorees,
-      ...horsSemaine.map(
-        (p) => `${p.nom} porte sur le ${p.journee}, hors de la semaine`
-      ),
-    ],
+    // Une piece illisible et une piece hors periode n'ont rien en commun.
+    // Melangees, elles ressortaient toutes annoncees "piece non lue" -- ce
+    // qui etait faux pour les secondes, parfaitement lues, et donnait a
+    // penser que le pipeline avait echoue alors qu'il avait bien travaille.
+    pieces_ignorees: ignorees,
+    pieces_hors_periode: horsSemaine.map(
+      (p) => `${p.nom} (porte sur le ${p.journee})`
+    ),
     cout_pieces: coutPieces,
     usage,
     modele,

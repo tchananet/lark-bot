@@ -7,6 +7,7 @@ const Lark = require("@larksuiteoapi/node-sdk");
 const { produireQuotidien, produireHebdomadaire } = require("./rapport");
 const { localReportDate } = require("./database");
 const { questionsPourLeRapport } = require("./arbitrage");
+const { memoriserRapport } = require("./memoire");
 
 // ---------------------------------------------------------------------------
 // Production et publication du rapport
@@ -267,12 +268,38 @@ async function publierRapport(options = {}) {
     // comptes rendus attendus qui ne sont pas arrives, les pieces que le
     // programme n'a pas su lire, et les defauts de validation. La DRH doit
     // le savoir ; la Direction Generale n'a pas a le lire.
-    const reserves = [
+    // Le meme fichier arrive souvent deux fois, envoye par deux personnes :
+    // le dire deux fois donne a croire qu'il manque deux choses.
+    const reserves = [...new Set([
       ...resultat.erreurs,
       ...(resultat.notes_drh || []),
       ...(resultat.document.donnees_manquantes || []),
-      ...(resultat.pieces_ignorees || []).map((piece) => `piece non lue : ${piece}`),
-    ];
+      ...(resultat.pieces_ignorees || []).map(
+        (piece) => `piece non lue : ${piece}`
+      ),
+      ...(resultat.pieces_hors_periode || []).map(
+        (piece) => `lue mais hors de la periode couverte : ${piece}`
+      ),
+    ])];
+
+    // Le rapport rejoint la memoire : son texte devient interrogeable, alors
+    // que le .docx sur le disque ne l'etait pas.
+    try {
+      memoriserRapport({
+        portee: hebdomadaire ? "SEMAINE" : "JOURNEE",
+        date_debut: resultat.date,
+        date_fin: resultat.fin || resultat.date,
+        numero: resultat.document.numero,
+        titre: resultat.document.titre_periode || resultat.document.titre_date,
+        chemin: resultat.chemin || null,
+        document: resultat.document,
+        texte: enTexte(resultat.document),
+      });
+    } catch (erreur) {
+      // Un echec de memorisation ne doit pas empecher la publication : le
+      // rapport existe, c'est le principal.
+      console.error(`[rapport] memorisation impossible : ${erreur.message}`);
+    }
 
     console.log(
       `[rapport] ${resultat.modele}, ` +
