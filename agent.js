@@ -1,5 +1,11 @@
 const { generer } = require("./ia");
 const { appeler, declarations } = require("./outils");
+const {
+  declarationsEcriture,
+  appelerEcriture,
+  estOutilDEcriture,
+  enAttente,
+} = require("./outils-ecriture");
 const { ajouter, fil, consignes } = require("./conversation");
 
 // ---------------------------------------------------------------------------
@@ -13,13 +19,18 @@ const { ajouter, fil, consignes } = require("./conversation");
 // hebdomadaire a ete publie dans le groupe de suivi.
 //
 // Ici, le modele choisit ce qu'il consulte, peut enchainer plusieurs outils,
-// et REPOND. Aucun outil n'ecrit : a cette etape il ne peut ni enregistrer ni
-// publier quoi que ce soit. Quand on lui demande une action, il dit ce qu'il
-// ferait et s'arrete la.
+// et REPOND. Une question ne declenche rien.
 //
-// Ce n'est pas une limite provisoire a lever vite : c'est la seule position
-// sure tant que la confirmation avant ecriture n'existe pas. Un assistant qui
-// se renseigne ne peut rien casser.
+// Il peut aussi ecrire -- produire un rapport, enregistrer une absence,
+// corriger une heure -- mais jamais de sa propre initiative. Un outil
+// d'ecriture depose une proposition ; la DRH l'accepte au tour suivant. La
+// garde qui rend cela reel est arithmetique et non declarative : un humain
+// doit avoir parle entre la demande et l'accord (voir actions.js). Une
+// consigne seule n'aurait rien empeche -- on l'a vu avec les six absences
+// fabriquees du 19 septembre.
+//
+// Publier dans le groupe reste hors de sa portee. Produire un document et le
+// diffuser a la Direction Generale ne se valent pas.
 // ---------------------------------------------------------------------------
 
 const TOURS_MAX = Number(process.env.AGENT_TOURS_MAX || 6);
@@ -42,11 +53,29 @@ function instructions() {
     "cette semaine, lundi -- appelle aujourdhui. Ne calcule jamais une date de",
     "tete.",
     "",
-    "CE QUE TU NE PEUX PAS FAIRE",
-    "Tu ne peux RIEN ecrire ni envoyer : ni produire un rapport, ni le publier,",
-    "ni enregistrer une absence, ni corriger un pointage. Si on te le demande,",
-    "dis franchement que tu ne peux pas encore le faire, et propose ce que tu",
-    "peux : montrer ce qui est disponible, ce qui manque, ce qui bloque.",
+    "AGIR : JAMAIS SANS SON ACCORD",
+    "Tu disposes aussi d'outils qui ECRIVENT : produire un rapport,",
+    "enregistrer une absence, corriger une heure, trancher une absence",
+    "supposee, retenir une consigne. Ils ne font rien immediatement : ils",
+    "deposent une PROPOSITION et te rendent un numero.",
+    "",
+    "La marche a suivre, sans exception :",
+    "1. Tu appelles l'outil. Il te rend un resume et un numero.",
+    "2. Tu PRESENTES ce resume a la DRH, clairement, et tu t'arretes la.",
+    "3. Au tour suivant, si elle accepte, tu appelles confirmer_action avec ce",
+    "   numero. Si elle refuse, annuler_action.",
+    "",
+    "N'appelle jamais confirmer_action dans le meme tour que la proposition :",
+    "ce sera refuse. Une confirmation que tu te donnes toi-meme n'en est pas",
+    "une.",
+    "",
+    "Verifie avant de proposer. Avant un rapport, regarde etat_journee et",
+    "en_attente_de_decision : proposer de produire un rapport qui ne peut pas",
+    "l'etre fait perdre un tour.",
+    "",
+    "Tu ne peux PAS publier ni envoyer quoi que ce soit dans le groupe de",
+    "suivi, ni a personne d'autre que ton interlocuteur. Produire un document",
+    "et le diffuser a la Direction Generale ne se valent pas.",
     "N'annonce jamais avoir fait quelque chose que tu n'as pas fait.",
     "",
     "COMMENT REPONDRE",
@@ -60,13 +89,32 @@ function instructions() {
 }
 
 
-function systeme() {
+// Les propositions ouvertes figurent dans le contexte : sans cela, un « oui »
+// de la DRH au tour suivant ne se rattache a rien, et l'assistant reproposerait
+// la meme chose indefiniment.
+function systeme(chatId = null) {
+  const morceaux = [instructions()];
   const regles = consignes();
 
-  return regles.length
-    ? `${instructions()}\n\nCONSIGNES DE LA DRH, qui priment :\n` +
+  if (regles.length) {
+    morceaux.push(
+      "CONSIGNES DE LA DRH, qui priment :\n" +
       regles.map((r) => `- ${r}`).join("\n")
-    : instructions();
+    );
+  }
+
+  const ouvertes = chatId ? enAttente(chatId) : [];
+
+  if (ouvertes.length) {
+    morceaux.push(
+      "PROPOSITIONS EN ATTENTE DE SA REPONSE :\n" +
+      ouvertes.map((a) => `- n° ${a.id} : ${a.resume}`).join("\n") +
+      "\nSi son message accepte l'une d'elles, appelle confirmer_action avec " +
+      "son numero. S'il la refuse, annuler_action. Ne la repropose pas."
+    );
+  }
+
+  return morceaux.join("\n\n");
 }
 
 
@@ -90,11 +138,29 @@ function borner(valeur, maximum = 6000) {
 async function repondre({
   chatId,
   texte,
+  expediteur = {},
   generateur = generer,
-  outils = declarations(),
-  executer = appeler,
+  outils = null,
+  executer = null,
   tracer = () => {},
 }) {
+  const contexte = {
+    chatId,
+    declare_par: expediteur.nom || expediteur.open_id || "RH",
+  };
+
+  // Consultation et ecriture sont deux familles distinctes, dans deux
+  // fichiers distincts : c'est ce qui permet d'exiger par un test qu'aucune
+  // ecriture ne se glisse dans les outils de consultation.
+  const aDisposition = outils || [...declarations(), ...declarationsEcriture()];
+
+  const executerOutil =
+    executer ||
+    ((nom, args) =>
+      estOutilDEcriture(nom)
+        ? appelerEcriture(nom, args, contexte)
+        : appeler(nom, args));
+
   ajouter({ chat_id: chatId, role: "user", contenu: texte });
 
   const outilsAppeles = [];
@@ -102,7 +168,7 @@ async function repondre({
 
   for (let tour = 1; tour <= TOURS_MAX; tour++) {
     const messages = [
-      { role: "system", content: systeme() },
+      { role: "system", content: systeme(chatId) },
       ...fil(chatId),
     ];
 
@@ -110,7 +176,7 @@ async function repondre({
       tache: "CONVERSATION",
       temperature: 0.2,
       messages,
-      outils,
+      outils: aDisposition,
     });
 
     usage = {
@@ -151,7 +217,7 @@ async function repondre({
 
       const resultat = args._erreur
         ? { erreur: args._erreur }
-        : executer(nom, args);
+        : await executerOutil(nom, args);
 
       outilsAppeles.push({ nom, args, erreur: resultat?.erreur || null });
       tracer({ tour, nom, args, erreur: resultat?.erreur || null });

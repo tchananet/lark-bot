@@ -28,18 +28,25 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
 
       # L assistant conversationnel : le modele choisit ses outils au lieu
-      # d etre aiguille vers une fonction. Tant qu il ne sait ni produire ni
-      # publier un rapport, il reste facultatif -- l activer retire cette
-      # capacite a la DRH le temps que les outils d ecriture existent.
+      # d etre aiguille vers une fonction.
       #
       #   AGENT_CONVERSATION=true   les messages ecrits vont a l agent
       #   AGENT_CONVERSATION absent l aiguillage actuel, inchange
+      #
+      # Il consulte librement, et il peut ecrire -- produire un rapport,
+      # enregistrer une absence, corriger une heure -- mais uniquement apres
+      # accord explicite : chaque ecriture passe par une proposition que la DRH
+      # accepte au tour suivant. Il ne peut encore RIEN publier dans le groupe.
       #
       # Les pieces jointes ne passent jamais par lui : une fiche de presence
       # doit toujours traverser les deux moteurs et leur confrontation.
       AGENT_CONVERSATION: ${AGENT_CONVERSATION:-}
       AGENT_TOURS_MAX: ${AGENT_TOURS_MAX:-6}
       IA_MODELE_CONVERSATION: ${IA_MODELE_CONVERSATION:-}
+
+      # Duree de validite d une proposition en attente. Au-dela, un « oui »
+      # tardif ne peut plus declencher une action oubliee.
+      ACTION_VALIDITE_MINUTES: ${ACTION_VALIDITE_MINUTES:-60}
 
       # Identifiant Lark de la DRH. Sans lui, la reconnaissance retombe sur
       # le libelle du profil, qui peut etre maquille.

@@ -67,11 +67,21 @@ function appel(id, nom, args = {}) {
 
 (async () => {
   // --- Ce qu'il ne doit jamais croire pouvoir faire ------------------------
-  await verifier("les instructions interdisent d'agir", () => {
+  await verifier("les instructions exigent un accord avant d'ecrire", () => {
     const s = systeme();
 
-    assert.ok(s.includes("ne peux RIEN ecrire"), "l'interdiction n'est pas dite");
-    assert.ok(/publier/i.test(s), "publier n'est pas nomme");
+    assert.ok(
+      /JAMAIS SANS SON ACCORD/i.test(s),
+      "la regle de l'accord prealable n'est pas dite"
+    );
+    assert.ok(
+      /jamais confirmer_action dans le meme tour/i.test(s),
+      "rien n'interdit de se confirmer soi-meme"
+    );
+    assert.ok(
+      /ne peux PAS publier/i.test(s),
+      "la publication n'est pas exclue"
+    );
     assert.ok(
       /N'annonce jamais avoir fait/i.test(s),
       "rien n'interdit d'annoncer une action non faite"

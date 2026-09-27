@@ -856,10 +856,10 @@ async function traiterConversation(texte, fichiers, repondre) {
 
 // L'agent prend la conversation, l'aiguillage garde les documents.
 //
-// Tant qu'il ne sait pas produire ni publier un rapport, l'agent ne peut pas
-// remplacer l'aiguillage sans retirer une capacite a la DRH. D'ou cet
-// interrupteur : il permet de l'essayer pour de vrai dans Lark sans rien
-// perdre, et disparaitra quand les outils d'ecriture existeront.
+// L'agent sait desormais produire un rapport et ecrire en base, mais jamais
+// sans accord, et il ne sait pas encore publier dans le groupe. L'interrupteur
+// reste donc : il permet de l'essayer pour de vrai dans Lark sans rien perdre,
+// et disparaitra quand la diffusion existera.
 //
 // Les pieces jointes ne passent jamais par lui : une fiche de presence doit
 // toujours traverser les deux moteurs et leur confrontation.
