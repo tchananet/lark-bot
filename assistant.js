@@ -206,6 +206,15 @@ function texteSoumis(texte, fichiers = []) {
 }
 
 
+// Une formule de portee generale explicite -- pas le mot "absence" tout
+// seul. Restreint a dessein : un faux negatif ne coute qu'une reponse a
+// preciser, un faux positif ecrit une absence sur une personne que la DRH
+// n'a pas designee.
+function estCatchAllAbsences(texte) {
+  return /(LES AUTRES|LE RESTE|LE RESTANT|TOUT LE MONDE)/.test(sansAccents(texte));
+}
+
+
 function citeDansLeMessage(nom, texte) {
   const corps = sansAccents(texte);
 
@@ -593,7 +602,10 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
     `dit rien de cette personne.\n` +
     `Une formule comme "les autres sont absents" ou "le reste absent" ` +
     `s'applique a toutes celles que la reponse n'a pas nommees.\n` +
-    `Si le message ne repond pas du tout a la question, mets INCONNU partout.\n` +
+    `Si le message ne repond pas du tout a la question -- s'il ne nomme ` +
+    `aucune de ces personnes et n'emploie pas une formule comme "les ` +
+    `autres" ou "le reste" -- mets INCONNU partout. Le mot "absence" seul, ` +
+    `sans lien avec une personne precise de la liste, ne repond a rien.\n` +
     `N'ajoute aucun nom qui ne figure pas dans la liste.\n\n` +
     `Reponds en JSON strict : ` +
     `{"reponses":[{"nom":"...","statut":"...","motif":"..."}]}`;
@@ -617,6 +629,11 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
   const attendus = new Map(ouvertes.map((q) => [q.nom, q]));
   const tranchees = [];
 
+  // Verifie une fois pour toutes les personnes, pas par nom : un "les
+  // autres" vaut pour celles que le message n'a pas nommees individuellement.
+  const casDeCatchAll = estCatchAllAbsences(texte);
+  let proposeMaisNonNomme = false;
+
   for (const reponse of brut.reponses || []) {
     // Un nom hors de la question est ignore : le modele n'a pas le droit
     // d'elargir ce qui lui a ete soumis.
@@ -625,6 +642,20 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
     }
 
     if (!LIBELLES_STATUT[reponse.statut]) {
+      continue;
+    }
+
+    // Le modele propose un statut ; le programme verifie que le message
+    // nomme REELLEMENT cette personne, ou emploie un catch-all explicite --
+    // jamais sur la seule parole du modele. C'est exactement ce qui a manque
+    // le 29 septembre.
+    const employeVise = resoudreEmploye(reponse.nom).employe;
+    const nomme =
+      citeDansLeMessage(reponse.nom, texte) ||
+      (employeVise && citeDansLeMessage(employeVise.nom_complet, texte));
+
+    if (!nomme && !casDeCatchAll) {
+      proposeMaisNonNomme = true;
       continue;
     }
 
@@ -652,6 +683,17 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
 
   // Aucune personne reconnue : le message parlait d'autre chose.
   if (!tranchees.length) {
+    if (proposeMaisNonNomme) {
+      await repondre(
+        "Je ne suis pas sûr de qui tu confirmes : ton message ne nomme pas " +
+        "clairement ces personnes, et n'emploie pas non plus \"les autres\" " +
+        "ou \"le reste\". Peux-tu répondre en les nommant, par exemple : « " +
+        `${ouvertes[0].nom} absent, les autres en congé » ?`
+      );
+
+      return true;
+    }
+
     return false;
   }
 
@@ -981,4 +1023,4 @@ async function traiter({
   }
 }
 
-module.exports = { traiter, texteSoumis, citeDansLeMessage, traiterPointage };
+module.exports = { traiter, texteSoumis, citeDansLeMessage, traiterPointage, lireReponseAbsences };
