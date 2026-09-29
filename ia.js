@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
+const { texteConnu } = require("./database");
 
 // ---------------------------------------------------------------------------
 // Passerelle vers les modeles, via OpenRouter
@@ -323,6 +324,24 @@ async function messageAvecPages(texte, fichiers = []) {
     if (partie) {
       parties.push({ type: "text", text: `\nPIECE JOINTE : ${nom}` });
       parties.push(partie);
+    } else {
+      // Un format que la vision ne sait pas ouvrir -- un .docx, typiquement
+      // -- disparaissait sans un mot : partieFichier rend null, et la piece
+      // jointe manquait purement et simplement au message. Le 29 septembre,
+      // une fiche de presence Word envoyee seule est ainsi arrivee VIDE au
+      // routage, qui l'a classee PERMISSION au hasard plutot que POINTAGE.
+      // Le texte est deja en base des l'arrivee du fichier (lireDesMaintenant
+      // dans index.js) : on le donne tel quel, tronque, plutot que rien.
+      const connu = texteConnu(chemin);
+
+      if (connu) {
+        parties.push({
+          type: "text",
+          text:
+            `\nPIECE JOINTE : ${nom} (texte extrait, ${connu.moteur}) :\n` +
+            connu.texte.slice(0, 6000),
+        });
+      }
     }
   }
 

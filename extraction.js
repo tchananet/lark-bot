@@ -1,4 +1,6 @@
-const { genererJson, messageAvecPages } = require("./ia");
+const path = require("path");
+const { genererJson, messageAvecPages, messageUtilisateur } = require("./ia");
+const { texteConnu } = require("./database");
 const { normaliserHeure } = require("./temps");
 const gemini = require("./gemini");
 const {
@@ -67,6 +69,51 @@ const SCHEMA_POINTAGE = {
   },
   required: ["pages"],
 };
+
+// Une fiche .docx n'a rien d'un scan : le texte est deja exact, extrait une
+// fois pour toutes par mammoth (voir rapport.js). L'envoyer en image a un
+// modele de vision echouerait -- aucun moteur de vision n'accepte ce format
+// -- et serait un contresens : il n'y a aucune ambiguite d'ecriture a lever,
+// seulement un tableau a structurer.
+function promptPointageTexte(texte) {
+  const noms = listerEmployes().map((e) => e.nom_fiche || e.nom_complet);
+
+  return `Voici le texte, deja extrait, d'une fiche de presence ALPHA MOTORS
+au format Word. Structure-le selon le schema demande.
+
+UN DOCUMENT PEUT CONTENIR PLUSIEURS JOURNEES. Chaque section porte sa propre
+date, au format AAAA-MM-JJ dans la reponse.
+
+Colonnes, dans l'ordre : NOM ET PRENOMS, HEURE D'ARRIVEE, HDP (depart en
+pause), HRP (retour de pause), HEURE DE DEPART, puis une eventuelle
+OBSERVATION. Un tiret ou une cellule vide signifie qu'aucune heure n'est
+inscrite : laisse le champ correspondant a null, ne devine jamais une heure.
+
+Les noms preimprimes sont pris dans cette liste :
+${noms.map((n) => `- ${n}`).join("\n")}
+Reproduis chaque nom EXACTEMENT comme dans cette liste. Si une ligne porte un
+nom absent de la liste, recopie-le tel qu'il est ecrit dans le document.
+
+TEXTE DE LA FICHE :
+${texte}`;
+}
+
+
+// Lecture unique : le texte source ne comporte aucune ambiguite d'ecriture a
+// confronter, contrairement a un scan manuscrit. Deux passes du meme texte
+// donneraient la meme reponse, ou la meme erreur -- confronter n'apporterait
+// rien qu'une relecture ne prouve deja.
+async function lirePointageTexte(texte) {
+  const { donnees } = await genererJson({
+    tache: "RAPPORT",
+    messages: [{ role: "user", content: promptPointageTexte(texte) }],
+    schema: SCHEMA_POINTAGE,
+    temperature: 0,
+  });
+
+  return rangerParJour(donnees);
+}
+
 
 function promptPointage() {
   const noms = listerEmployes().map((e) => e.nom_fiche || e.nom_complet);
@@ -159,6 +206,20 @@ async function lirePointageUnePasse(chemin) {
 }
 
 
+// Une Map<date, Map<cle, ligne>> mise a plat, date comprise sur chaque ligne.
+//
+// Le mode "un seul moteur a repondu" faisait `[...pages.values()].flatMap(...)`,
+// qui saute les cles de la Map externe -- justement les dates -- et rendait
+// des lignes sans date. enregistrerPointage les ecrivait alors sous
+// date=null : toutes les lignes d'une lecture simple s'ecrasaient les unes
+// les autres sur une seule ligne fantome.
+function aplatir(pages) {
+  return [...pages.entries()].flatMap(
+    ([date, lignes]) => [...lignes.values()].map((ligne) => ({ date, ...ligne }))
+  );
+}
+
+
 // Confronte deux lectures. Ce sur quoi elles s'accordent est retenu ; tout
 // desaccord part en revue plutot que d'entrer dans les chiffres.
 function confronter(passeA, passeB) {
@@ -231,6 +292,22 @@ function confronter(passeA, passeB) {
 
 async function lirePages(chemin) {
 
+  // Une fiche .docx n'a rien a faire dans le circuit vision : aucun moteur de
+  // vision n'accepte ce format, et il n'y a de toute facon aucune ambiguite
+  // d'ecriture a lever -- seulement un tableau texte a structurer. Le texte
+  // est deja en base des l'arrivee du fichier (voir lireDesMaintenant dans
+  // index.js) ; s'il ne l'est pas encore, on l'extrait a l'instant.
+  if (path.extname(chemin).toLowerCase() === ".docx") {
+    const connu = texteConnu(chemin);
+    const texte = connu ? connu.texte : await require("./extractors").extractWord(chemin);
+
+    return {
+      retenus: aplatir(await lirePointageTexte(texte)),
+      divergences: [],
+      moteurUnique: "lecture du texte Word",
+    };
+  }
+
   // Deux MOTEURS differents, pas deux passes du meme modele : deux lectures
   // d'un meme modele partagent les memes angles morts et se trompent
   // ensemble. Sur la fiche du 15/09, Gemini a lu deux fois 08h02 puis 08h09
@@ -275,7 +352,7 @@ async function lirePages(chemin) {
     ({ retenus, divergences } = confronter(reussies[0].pages, reussies[1].pages));
   } else {
     moteurUnique = reussies[0].nom;
-    retenus = [...reussies[0].pages.values()].flatMap((jour) => [...jour.values()]);
+    retenus = aplatir(reussies[0].pages);
     divergences = [];
 
     console.warn(
@@ -600,6 +677,9 @@ module.exports = {
   extrairePlanning,
   classerDocument,
   confronter,
+  aplatir,
   lirePointageUnePasse,
   lirePointageGemini,
+  lirePointageTexte,
+  promptPointageTexte,
 };

@@ -74,7 +74,17 @@ function resumeQuestions(date) {
 // Elles partagent donc la journee de la premiere, celle qui porte l'en-tete.
 // La date retenue est annoncee : c'est une deduction, elle doit se voir.
 async function traiterPointage(fichiers, repondre) {
+  // Un message route en POINTAGE mais sans la moindre piece jointe n'est pas
+  // silencieux par accident : le 29 septembre, une DRH a ecrit "voici la
+  // fiche de presence du 28 septembre" dans un post Lark dont le fichier
+  // n'est jamais arrive -- traiterPointage([]) est rentre et ressorti sans
+  // un mot en neuf secondes. Le silence a ete pris pour une non-reponse.
   if (!fichiers.length) {
+    await repondre(
+      "Je ne vois aucun fichier joint à ce message. Peux-tu renvoyer la " +
+      "fiche de présence en pièce jointe ?"
+    );
+
     return;
   }
 
@@ -971,4 +981,4 @@ async function traiter({
   }
 }
 
-module.exports = { traiter, texteSoumis, citeDansLeMessage };
+module.exports = { traiter, texteSoumis, citeDansLeMessage, traiterPointage };
