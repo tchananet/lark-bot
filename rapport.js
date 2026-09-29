@@ -420,6 +420,16 @@ function valider(d, type, ponctualite = null) {
 
   for (const s of d.services || []) {
     if (vide(s.nom)) erreurs.push("service sans nom");
+
+    // Le 30 septembre, un service est ressorti sans son tableau de lignes
+    // -- le champ 'lignes' manquait entierement, malgre le schema qui
+    // l'exige. Sans ce controle, le document se produit quand meme (le
+    // rendu .docx tolere maintenant l'absence) mais avec une section vide,
+    // sans que rien ne le signale.
+    if (!Array.isArray(s.lignes)) {
+      erreurs.push(`service sans lignes (tableau attendu) : ${s.nom || "(sans nom)"}`);
+    }
+
     for (const l of s.lignes || []) {
       if (vide(l.libelle)) erreurs.push(`ligne sans libelle dans ${s.nom}`);
       if (vide(l.description)) erreurs.push(`ligne sans description dans ${s.nom}`);

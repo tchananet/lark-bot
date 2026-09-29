@@ -131,7 +131,7 @@ function corpsQuotidien(d) {
 
   ajouter(titreSection("Synthèse générale"));
 
-  if (d.synthese.length) {
+  if ((d.synthese || []).length) {
     ajouter(
       tableau(
         ["Indicateur", "Résultat", "Lecture"],
@@ -146,10 +146,10 @@ function corpsQuotidien(d) {
 
   ajouter(titreSection("Ponctualité"), paragraphe(d.ponctualite, { apres: 280 }));
 
-  for (const service of d.services) {
+  for (const service of d.services || []) {
     ajouter(titreSection(service.nom));
 
-    for (const l of service.lignes) {
+    for (const l of service.lignes || []) {
       ajouter(
         paragraphe(
           `• ${l.libelle} — ${l.description}` +
@@ -163,7 +163,7 @@ function corpsQuotidien(d) {
 
   ajouter(titreSection("Points d'attention"));
 
-  for (const p of d.points_attention) {
+  for (const p of d.points_attention || []) {
     ajouter(paragraphe(`• [${p.priorite}] ${p.intitule} — ${p.constat}`));
   }
 
@@ -175,8 +175,8 @@ function corpsQuotidien(d) {
 
   // Un intitule seul, sans une ligne dessous, se lit comme un defaut
   // d impression. On dit plutot ce qu il en est.
-  if (d.actions.length) {
-    for (const a of d.actions) {
+  if ((d.actions || []).length) {
+    for (const a of d.actions || []) {
       ajouter(paragraphe(`• ${a.service} — ${a.action}`));
     }
   } else {
@@ -185,7 +185,7 @@ function corpsQuotidien(d) {
 
   ajouter(paragraphe("", { apres: 160 }), titreSection("Conclusion"));
 
-  for (const para of d.conclusion) {
+  for (const para of d.conclusion || []) {
     ajouter(paragraphe(para));
   }
 
@@ -229,7 +229,7 @@ function corpsHebdomadaire(d) {
     titreSection("Synthèse exécutive"),
     tableau(
       ["Axe", "Constat hebdomadaire", "Point de vigilance / suite"],
-      d.axes.map((a) => [a.axe, a.constat, a.vigilance]),
+      (d.axes || []).map((a) => [a.axe, a.constat, a.vigilance]),
       [0.22, 0.42, 0.36]
     ),
     paragraphe("", { apres: 240 }),
@@ -237,7 +237,7 @@ function corpsHebdomadaire(d) {
     titreSection("Indicateurs commerciaux consolidés"),
     tableau(
       ["Date", "Showroom", "Proformas / ventes", "Call Center", "Relances / anomalies"],
-      d.indicateurs.map((i) => [
+      (d.indicateurs || []).map((i) => [
         i.date, i.showroom, i.proformas_ventes, i.call_center, i.relances,
       ]),
       [0.1, 0.22, 0.16, 0.28, 0.24]
