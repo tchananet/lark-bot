@@ -7,7 +7,15 @@ const {
   MINUTES_DE_VALIDITE,
 } = require("./actions");
 
-const { resoudreEmploye, enregistrerAbsence, corrigerPointage } = require("./hr");
+const {
+  resoudreEmploye,
+  enregistrerAbsence,
+  corrigerPointage,
+  comptesLarkPour,
+  accorderRoleRH,
+  retirerRoleRH,
+  listerRH,
+} = require("./hr");
 const { trancher, questionsOuvertes } = require("./arbitrage");
 const { ajouterConsigne } = require("./conversation");
 const { TYPES_PRESENCE_CONFIRMEE } = require("./presence");
@@ -354,6 +362,108 @@ const OUTILS_ECRITURE = [
         statut,
         restantes,
         rapport_debloque: restantes.length === 0,
+      };
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  {
+    nom: "proposer_acces",
+    description:
+      "Propose d'accorder ou de retirer à quelqu'un le droit de dialoguer " +
+      "avec l'assistant en tant que DRH. Vérifie d'abord avec acces_actuels " +
+      "qui est déjà habilité. Une action sensible : elle touche qui peut " +
+      "agir sur le système, pas seulement consulter.",
+    parametres: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["AJOUTER", "RETIRER"] },
+        personne: {
+          type: "string",
+          description: "Nom tel que la DRH l'a écrit.",
+        },
+      },
+      required: ["action", "personne"],
+    },
+
+    resumer({ action, personne }) {
+      return action === "RETIRER"
+        ? `Retirer à ${personne} l'accès à l'assistant.`
+        : `Accorder à ${personne} l'accès à l'assistant en tant que DRH.`;
+    },
+
+    verifier({ action, personne }) {
+      const { employe } = resoudreEmploye(personne);
+
+      if (!employe) {
+        return {
+          erreur:
+            `« ${personne} » ne correspond à personne au registre du ` +
+            `personnel. Vérifie l'orthographe avec chercher_personne.`,
+        };
+      }
+
+      // Pour ajouter, il faut un compte Lark deja vu -- pas question de
+      // proposer une habilitation qu'on ne pourra pas executer.
+      if (action === "AJOUTER") {
+        const comptes = comptesLarkPour(employe.id);
+
+        if (!comptes.length) {
+          return {
+            erreur:
+              `${employe.nom_complet} : aucun compte Lark connu pour cette ` +
+              `personne. Demande-lui d'écrire un message au bot, puis ` +
+              `réessaie.`,
+          };
+        }
+
+        if (comptes.length > 1) {
+          return {
+            erreur:
+              `${employe.nom_complet} : plusieurs comptes Lark correspondent ` +
+              `(${comptes.map((c) => c.name).join(", ")}). Précise lequel.`,
+          };
+        }
+      }
+
+      return {};
+    },
+
+    executer({ action, personne }, contexte) {
+      const { employe } = resoudreEmploye(personne);
+
+      if (!employe) {
+        return { erreur: `« ${personne} » ne correspond plus à personne au registre.` };
+      }
+
+      if (action === "RETIRER") {
+        retirerRoleRH(employe.id);
+
+        const { parConfig } = listerRH();
+
+        // La liste de configuration prime sur la base : le dire franchement
+        // plutot que de laisser croire a une revocation pleinement effective.
+        const parLaConfig = !!employe.lark_open_id && parConfig.includes(employe.lark_open_id);
+
+        return { retire: true, personne: employe.nom_complet, toujours_habilite_par_configuration: parLaConfig };
+      }
+
+      const comptes = comptesLarkPour(employe.id);
+
+      if (comptes.length !== 1) {
+        return {
+          erreur:
+            `${employe.nom_complet} : le compte Lark n'est plus univoque ` +
+            `(${comptes.length} correspondance(s)). Rien n'a été accordé.`,
+        };
+      }
+
+      accorderRoleRH(employe.id, comptes[0].open_id);
+
+      return {
+        accorde: true,
+        personne: employe.nom_complet,
+        accorde_par: contexte.declare_par,
       };
     },
   },

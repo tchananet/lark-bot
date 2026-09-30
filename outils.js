@@ -10,7 +10,7 @@ const {
 
 const { faitsDePonctualite } = require("./presence");
 const { inventaire, enFrancais: etatEnFrancais } = require("./inventaire");
-const { resoudreEmploye, listerEmployes, revuesEnAttente } = require("./hr");
+const { resoudreEmploye, listerEmployes, revuesEnAttente, listerRH } = require("./hr");
 const { questionsOuvertes } = require("./arbitrage");
 const { rapportsProduits, rapport, chercherDansRapports } = require("./memoire");
 const { etatDesAttendus } = require("./attendus");
@@ -540,6 +540,28 @@ const OUTILS = [
           recus: p.recu,
           attendus: p.quantite,
         })),
+      };
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  {
+    nom: "acces_actuels",
+    description:
+      "Qui a le droit de dialoguer avec l'assistant en tant que DRH. À " +
+      "utiliser pour « qui a accès au bot ? » avant de proposer d'en " +
+      "ajouter ou d'en retirer un.",
+    parametres: { type: "object", properties: {} },
+
+    executer() {
+      const { parConfig, enBase } = listerRH();
+
+      return {
+        habilites: enBase.map((e) => ({
+          nom_complet: e.nom_complet,
+          compte_lark_lie: !!e.lark_open_id,
+        })),
+        habilites_par_configuration_serveur: parConfig.length,
       };
     },
   },
