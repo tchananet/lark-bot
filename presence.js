@@ -33,6 +33,30 @@ const STATUTS = {
   AUTORISEE: "ABSENCE AUTORISÉE",
   MISSION: "EN MISSION",
   ABSENT: "ABSENT",
+
+  // Le 29 septembre, une DRH a confirme que deux personnes etaient PRESENTES
+  // -- la fiche ne les avait simplement pas captees. Le vocabulaire
+  // d'arbitrage n'avait que des statuts d'ABSENCE (PERMISSION, CONGE...) :
+  // faute d'option pour dire "elle etait la", le plus proche a ete choisi --
+  // PERMISSION -- et le rapport a fini par dire le contraire de ce qui avait
+  // ete confirme. PERMANENCE et TELETRAVAIL portaient deja le meme defaut,
+  // plus discret : rien n'etait ecrit pour eux, donc une relecture ulterieure
+  // de la journee les retrouvait ABSENT, comme si la question n'avait jamais
+  // ete tranchee.
+  PRESENT_CONFIRME: "PRÉSENCE CONFIRMÉE",
+};
+
+// Les types d'absence qui ne sont pas des absences : la personne a travaille,
+// seule une fiche ou une signature manque. PERMANENCE et TELETRAVAIL
+// existaient deja comme reponses possibles a l'arbitrage, mais rien n'etait
+// jamais ecrit pour eux -- une relecture ulterieure de la journee les
+// retrouvait ABSENT, comme si la question n'avait jamais ete tranchee.
+const TYPES_PRESENCE_CONFIRMEE = new Set(["PRESENT", "PERMANENCE", "TELETRAVAIL"]);
+
+const LIBELLES_PRESENCE_CONFIRMEE = {
+  PRESENT: "présence confirmée, fiche non renseignée",
+  PERMANENCE: "permanence confirmée",
+  TELETRAVAIL: "télétravail confirmé",
 };
 
 // Fonction pure : toute la logique metier, sans acces base. Testable seule.
@@ -75,6 +99,14 @@ function evaluerLigne(contexte) {
   if (arrivee === null && depart === null) {
     if (absence && absence.type === "MISSION") {
       return { ...base, statut: STATUTS.MISSION, detail: absence.motif || "en mission" };
+    }
+
+    if (absence && TYPES_PRESENCE_CONFIRMEE.has(absence.type)) {
+      return {
+        ...base,
+        statut: STATUTS.PRESENT_CONFIRME,
+        detail: absence.motif || LIBELLES_PRESENCE_CONFIRMEE[absence.type],
+      };
     }
 
     if (absence) {
@@ -297,4 +329,5 @@ module.exports = {
   evaluerLigne,
   evaluerJournee,
   faitsDePonctualite,
+  TYPES_PRESENCE_CONFIRMEE,
 };

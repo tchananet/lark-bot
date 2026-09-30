@@ -49,6 +49,9 @@ const STATUTS = new Set([
   "FORMATION",
   "PERMANENCE",
   "TELETRAVAIL",
+
+  // La personne etait presente ; la fiche ne l'a simplement pas captee.
+  "PRESENT",
 ]);
 
 
@@ -159,8 +162,8 @@ function questionsPourLeRapport(date) {
     `tout : permanence, congé, mission n'y figurent pas.\n\n` +
     questions.map((q) => `• ${q.nom}`).join("\n") +
     `\n\nDis-moi pour chacune, en la nommant : congé, permission, mission, ` +
-    `formation, maladie, permanence, télétravail — ou « absent » si c'en est ` +
-    `bien une.\n` +
+    `formation, maladie, permanence, télétravail — « absent » si c'en est ` +
+    `bien une, ou « présent(e) » si la fiche ne l'a simplement pas captée.\n` +
     `Par exemple : « ${questions[0].nom} en congé, les autres absents ».\n\n` +
     `Le rapport attend ta réponse.`;
 

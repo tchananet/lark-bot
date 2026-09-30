@@ -2,7 +2,11 @@ const { analyser } = require("./routeur");
 const { repondre: repondreEnAgent } = require("./agent");
 const { extrairePointageLot, extrairePlanning } = require("./extraction");
 const { publierRapport } = require("./publication");
-const { evaluerJournee, faitsDePonctualite } = require("./presence");
+const {
+  evaluerJournee,
+  faitsDePonctualite,
+  TYPES_PRESENCE_CONFIRMEE,
+} = require("./presence");
 const {
   questionsPourLeRapport,
   questionsOuvertes,
@@ -559,15 +563,30 @@ const LIBELLES_STATUT = {
   MISSION: "mission",
   MALADIE: "arrêt maladie",
   FORMATION: "formation",
-  PERMANENCE: "permanence",
-  TELETRAVAIL: "télétravail",
+  PERMANENCE: "permanence confirmée",
+  TELETRAVAIL: "télétravail confirmé",
+
+  // Le 29 septembre, une DRH a confirme "présentes" pour deux personnes ;
+  // faute de ce statut, PERMISSION a ete choisi -- l'oppose de ce qui avait
+  // ete dit. Le rapport a fini par les annoncer excusees, plutot que
+  // simplement mal pointees.
+  PRESENT: "présence confirmée",
 };
 
-// Les statuts qui valent justification : ils s'inscrivent au registre des
-// absences. ABSENT ferme la question sans rien inscrire, et PERMANENCE comme
-// TELETRAVAIL ne sont pas des absences du tout.
+// Les statuts qui s'inscrivent au registre : chacun dit une chose que la
+// fiche, seule, ne pouvait pas dire. ABSENT ferme la question sans rien
+// inscrire -- c'est une absence reelle, la fiche a raison.
+//
+// PERMANENCE et TELETRAVAIL en etaient exclus ("ne sont pas des absences du
+// tout"), mais l'exclure signifiait ne RIEN ecrire pour ce jour : une
+// relecture ulterieure de la journee ne trouvait toujours aucune fiche et
+// concluait de nouveau ABSENT, comme si la question n'avait jamais ete
+// tranchee. Ils rejoignent desormais PRESENT dans le meme registre ; c'est
+// presence.js qui decide comment chaque type s'affiche -- jamais comme une
+// absence excusee pour ces trois-la.
 const JUSTIFICATIFS = new Set([
   "PERMISSION", "CONGE", "MISSION", "MALADIE", "FORMATION",
+  ...TYPES_PRESENCE_CONFIRMEE,
 ]);
 
 
@@ -598,8 +617,12 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
     `REPONSE :\n${texte.trim()}\n\n` +
     `Pour CHACUNE des personnes ci-dessus, donne le statut que la reponse lui ` +
     `attribue. Statuts possibles : ABSENT, PERMISSION, CONGE, MISSION, ` +
-    `MALADIE, FORMATION, PERMANENCE, TELETRAVAIL, ou INCONNU si la reponse ne ` +
-    `dit rien de cette personne.\n` +
+    `MALADIE, FORMATION, PERMANENCE, TELETRAVAIL, PRESENT, ou INCONNU si la ` +
+    `reponse ne dit rien de cette personne.\n` +
+    `PRESENT : la personne a travaille, seule la fiche ne l'a pas captee --  ` +
+    `"elle etait la", "presente", "le script n'a pas pris". Ne confonds ` +
+    `jamais ceci avec PERMISSION, qui signifie une absence EXCUSEE : une ` +
+    `personne dite presente n'est PAS en permission.\n` +
     `Une formule comme "les autres sont absents" ou "le reste absent" ` +
     `s'applique a toutes celles que la reponse n'a pas nommees.\n` +
     `Si le message ne repond pas du tout a la question -- s'il ne nomme ` +
@@ -634,6 +657,13 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
   const casDeCatchAll = estCatchAllAbsences(texte);
   let proposeMaisNonNomme = false;
 
+  // Le 29 septembre, une reponse nommait clairement deux personnes ("MESSIHA
+  // ANGE, NGAKEU GLORIA... presentes"), mais le statut que le modele leur a
+  // attribue n'avait pas d'equivalent connu : la ligne etait silencieusement
+  // ignoree, sans le moindre mot a la DRH. Elle n'avait alors aucun moyen de
+  // savoir que sa reponse, pourtant claire, n'avait servi a rien.
+  let statutNonReconnu = false;
+
   for (const reponse of brut.reponses || []) {
     // Un nom hors de la question est ignore : le modele n'a pas le droit
     // d'elargir ce qui lui a ete soumis.
@@ -642,6 +672,7 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
     }
 
     if (!LIBELLES_STATUT[reponse.statut]) {
+      statutNonReconnu = true;
       continue;
     }
 
@@ -689,6 +720,17 @@ async function lireReponseAbsences(texte, expediteur, repondre) {
         "clairement ces personnes, et n'emploie pas non plus \"les autres\" " +
         "ou \"le reste\". Peux-tu répondre en les nommant, par exemple : « " +
         `${ouvertes[0].nom} absent, les autres en congé » ?`
+      );
+
+      return true;
+    }
+
+    if (statutNonReconnu) {
+      await repondre(
+        "Je n'ai pas compris ce que tu veux dire pour ces personnes. Utilise " +
+        "l'un de ces mots : absent, permission, congé, mission, formation, " +
+        "maladie, permanence, télétravail, ou présent si la fiche ne l'a " +
+        "simplement pas captée."
       );
 
       return true;

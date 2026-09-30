@@ -10,6 +10,7 @@ const {
 const { resoudreEmploye, enregistrerAbsence, corrigerPointage } = require("./hr");
 const { trancher, questionsOuvertes } = require("./arbitrage");
 const { ajouterConsigne } = require("./conversation");
+const { TYPES_PRESENCE_CONFIRMEE } = require("./presence");
 
 // ---------------------------------------------------------------------------
 // Ce que l'assistant peut FAIRE -- et jamais de sa seule initiative
@@ -274,9 +275,11 @@ const OUTILS_ECRITURE = [
     description:
       "Propose de trancher une absence supposée que le bot a signalée : " +
       "congé, permission, mission, formation, maladie, permanence, " +
-      "télétravail, ou ABSENT si c'en est bien une. Tant qu'il en reste, le " +
-      "rapport de cette journée ne peut pas être produit. Lister d'abord " +
-      "avec en_attente_de_decision.",
+      "télétravail, ABSENT si c'en est bien une, ou PRESENT si la personne " +
+      "a travaillé et que seule la fiche ne l'a pas captée -- ne confonds " +
+      "jamais PRESENT avec PERMISSION, qui signifie une absence EXCUSÉE. " +
+      "Tant qu'il en reste, le rapport de cette journée ne peut pas être " +
+      "produit. Lister d'abord avec en_attente_de_decision.",
     parametres: {
       type: "object",
       properties: {
@@ -288,8 +291,8 @@ const OUTILS_ECRITURE = [
         statut: {
           type: "string",
           enum: [
-            "ABSENT", "PERMISSION", "CONGE", "MISSION",
-            "MALADIE", "FORMATION", "PERMANENCE", "TELETRAVAIL",
+            "ABSENT", "PERMISSION", "CONGE", "MISSION", "MALADIE",
+            "FORMATION", "PERMANENCE", "TELETRAVAIL", "PRESENT",
           ],
         },
         motif: { type: "string" },
@@ -324,9 +327,11 @@ const OUTILS_ECRITURE = [
     executer({ date, personne, statut, motif }, contexte) {
       trancher(date, personne, statut, motif || null);
 
-      // Un justificatif s'inscrit au registre des absences : il vaudra pour
-      // toute relecture ulterieure de cette journee.
-      if (TYPES_ABSENCE.includes(statut)) {
+      // Un justificatif -- ou une presence confirmee -- s'inscrit au
+      // registre : sans cela, une relecture ulterieure de cette journee ne
+      // trouve toujours aucune fiche pour cette personne et la reclasse
+      // ABSENT, comme si la question n'avait jamais ete tranchee.
+      if (TYPES_ABSENCE.includes(statut) || TYPES_PRESENCE_CONFIRMEE.has(statut)) {
         const { employe } = resoudreEmploye(personne);
 
         if (employe) {
