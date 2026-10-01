@@ -220,6 +220,32 @@ function aplatir(pages) {
 }
 
 
+// Rattache une ligne a un employe reel avant de comparer deux lectures : deux
+// moteurs qui transcrivent le meme nom differemment (abrege, lettre confondue)
+// ne doivent pas etre vus comme deux personnes distinctes. Le 30 septembre,
+// un moteur a lu "SOH ROMUALD", l'autre "SOH ROMUALD BRICE" -- la meme
+// personne, bien presente de 07h30 a 17h28 -- et la confrontation par texte
+// brut les a traitees comme deux lignes vues chacune par un seul moteur :
+// aucune des deux n'a ete retenue, et SOH ROMUALD est ressorti absent dans le
+// rapport alors qu'il avait signe. Sans employe reconnu, on retombe sur le
+// nom normalise : un nom hors registre doit rester signale, pas disparaitre.
+function cleRattachement(nom) {
+  const { employe } = resoudreEmploye(nom);
+
+  return employe ? `emp:${employe.id}` : `nom:${cleNom(nom)}`;
+}
+
+function reindexerParEmploye(lignes) {
+  const reindexees = new Map();
+
+  for (const ligne of lignes.values()) {
+    reindexees.set(cleRattachement(ligne.nom), ligne);
+  }
+
+  return reindexees;
+}
+
+
 // Confronte deux lectures. Ce sur quoi elles s'accordent est retenu ; tout
 // desaccord part en revue plutot que d'entrer dans les chiffres.
 function confronter(passeA, passeB) {
@@ -228,9 +254,6 @@ function confronter(passeA, passeB) {
   const dates = new Set([...passeA.keys(), ...passeB.keys()]);
 
   for (const date of dates) {
-    const a = passeA.get(date) || new Map();
-    const b = passeB.get(date) || new Map();
-
     if (!passeA.has(date) || !passeB.has(date)) {
       divergences.push({
         date,
@@ -241,6 +264,9 @@ function confronter(passeA, passeB) {
       });
       continue;
     }
+
+    const a = reindexerParEmploye(passeA.get(date));
+    const b = reindexerParEmploye(passeB.get(date));
 
     for (const cle of new Set([...a.keys(), ...b.keys()])) {
       const la = a.get(cle);
