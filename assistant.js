@@ -887,8 +887,22 @@ async function traiterConversation(texte, fichiers, repondre) {
     }
   }
 
-  // Ni document lisible, ni question : le silence vaut mieux qu'un accuse de
-  // reception a chaque bonjour.
+  // Un fichier joint dont la lecture a echoue doit quand meme recevoir une
+  // reponse : le silence a deja ete pris pour une non-reponse cette semaine
+  // (le 29 septembre, un post avec fichier jamais arrive). lireDesMaintenant
+  // a deja tente la lecture avant le routage ; si rien n'est en cache ici,
+  // c'est qu'elle a echoue, pas qu'elle n'a pas eu lieu.
+  if (fichiers.length && !documents.length) {
+    await repondre(
+      "Je n'ai pas réussi à lire ce document. Peux-tu le renvoyer, ou me " +
+      "dire ce qu'il contient ?"
+    );
+
+    return;
+  }
+
+  // Ni document lisible, ni question, ni fichier joint : le silence vaut
+  // mieux qu'un accuse de reception a chaque bonjour.
   if (!documents.length && texte.trim().length < 15) {
     return;
   }
@@ -1024,6 +1038,14 @@ async function traiter({
     case "GESTION_ACCES":
       if (analyse.acces) {
         await traiterAcces(analyse.acces, expediteur, repondre);
+      } else {
+        // L'intention est reconnue mais le modele n'en a tire aucun detail
+        // exploitable : repondre plutot que de se taire sur une demande
+        // qui portait sur qui peut agir sur le systeme.
+        await repondre(
+          "Je n'ai pas compris ce que tu demandes sur les accès. Précise : " +
+          "ajouter, retirer, ou lister qui a accès au bot."
+        );
       }
       return analyse;
 
@@ -1065,4 +1087,11 @@ async function traiter({
   }
 }
 
-module.exports = { traiter, texteSoumis, citeDansLeMessage, traiterPointage, lireReponseAbsences };
+module.exports = {
+  traiter,
+  texteSoumis,
+  citeDansLeMessage,
+  traiterPointage,
+  lireReponseAbsences,
+  traiterConversation,
+};
