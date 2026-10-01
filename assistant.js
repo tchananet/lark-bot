@@ -974,6 +974,25 @@ async function traiterConversation(texte, fichiers, repondre) {
 const AGENT_ACTIF = process.env.AGENT_CONVERSATION === "true";
 
 
+// Le 1er octobre, la cle OpenRouter a depasse sa limite d'usage : l'appel de
+// routage a echoue avec un 403, l'erreur n'etait rattrapee nulle part, et la
+// DRH a envoye une fiche sans recevoir le moindre mot en retour -- aucune
+// trace cote Lark qu'il y avait un probleme a resoudre.
+//
+// Une panne cote fournisseur d'IA (erreur.status present : la requete HTTP a
+// ete refusee) n'est pas quelque chose qu'elle peut resoudre en reformulant :
+// on l'oriente vers le service technique. Une panne sans statut HTTP (reseau
+// coupe, bug interne) peut au contraire s'arranger a la prochaine tentative.
+function messageErreurTechnique(erreur) {
+  return erreur?.status
+    ? "Je n'ai pas pu traiter ton message : le service d'intelligence " +
+      `artificielle a refuse la requête (erreur ${erreur.status}). ` +
+      "Contacte le service technique si cela persiste."
+    : "Je n'ai pas pu traiter ton message a cause d'une erreur technique. " +
+      "Réessaie, ou contacte le service technique si cela persiste.";
+}
+
+
 async function traiter({
   texte = "",
   fichiers = [],
@@ -1094,4 +1113,5 @@ module.exports = {
   traiterPointage,
   lireReponseAbsences,
   traiterConversation,
+  messageErreurTechnique,
 };

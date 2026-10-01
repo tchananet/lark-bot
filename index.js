@@ -5,7 +5,7 @@ const { extractWord } = require("./extractors");
 
 const cron = require("node-cron");
 const Lark = require("@larksuiteoapi/node-sdk");
-const { traiter } = require("./assistant");
+const { traiter, messageErreurTechnique } = require("./assistant");
 const { publierRapport } = require("./publication");
 const { relancer } = require("./relance");
 const {
@@ -719,7 +719,17 @@ async function handleMessage(data) {
           duree_ms: Date.now() - debutTraitement,
         });
 
-        throw erreur;
+        console.error(`Erreur de traitement pour ${message.message_id} :`, erreur);
+
+        // Une panne qui remonte jusqu'ici ne doit jamais se solder par un
+        // silence total : le 1er octobre, une limite depassee sur la cle
+        // OpenRouter a fait echouer le routage, et la fiche envoyee a
+        // disparu sans un mot -- aucun indice, cote Lark, qu'il y avait un
+        // probleme a resoudre.
+        await sendTextToChat(message.chat_id, messageErreurTechnique(erreur)).catch(
+          (erreurEnvoi) =>
+            console.error("Echec de l'envoi du message d'erreur :", erreurEnvoi)
+        );
       }
     } else {
       console.log(
