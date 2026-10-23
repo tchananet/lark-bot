@@ -41,6 +41,14 @@ const JOUR = { type: "string", description: "Journée au format AAAA-MM-JJ" };
 
 const TYPES_ABSENCE = ["PERMISSION", "CONGE", "MISSION", "MALADIE", "FORMATION"];
 
+const TYPES_MESURE_DISCIPLINAIRE = [
+  "Demande d'explication",
+  "Avertissement Verbal",
+  "Avertissement écrit",
+  "Mise à pied",
+  "Autre",
+];
+
 const CHAMPS_POINTAGE = [
   "heure_arrivee",
   "heure_depart_pause",
@@ -464,6 +472,195 @@ const OUTILS_ECRITURE = [
         accorde: true,
         personne: employe.nom_complet,
         accorde_par: contexte.declare_par,
+      };
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  {
+    nom: "proposer_permission",
+    description:
+      "Propose d'enregistrer une permission pour quelqu'un, cote Odoo " +
+      "(hr.leave, type « Permission », sans solde). Deux cas, a distinguer " +
+      "par le statut : A_APPROUVER si c'est une demande en cours, pas " +
+      "encore tranchee -- il faudra un « c'est valide » dans un message " +
+      "ulterieur pour la faire passer en approuvee. DEJA_APPROUVEE si la " +
+      "DRH annonce un fait deja decide (« X est en permission aujourd'hui "+
+      "/ demain ») -- elle s'ecrit alors directement comme approuvee, sans " +
+      "etape supplementaire. Dans les deux cas, cet outil propose seulement " +
+      "-- il n'ecrit rien avant confirmer_action.",
+    parametres: {
+      type: "object",
+      properties: {
+        personne: {
+          type: "string",
+          description: "Nom tel que la DRH l'a écrit.",
+        },
+        date_debut: JOUR,
+        date_fin: {
+          ...JOUR,
+          description: "Dernier jour, inclus. Égal à date_debut si omis.",
+        },
+        statut: {
+          type: "string",
+          enum: ["A_APPROUVER", "DEJA_APPROUVEE"],
+        },
+        motif: { type: "string" },
+      },
+      required: ["personne", "date_debut", "statut"],
+    },
+
+    resumer({ personne, date_debut, date_fin, statut, motif }) {
+      const periode =
+        date_fin && date_fin !== date_debut
+          ? `du ${date_debut} au ${date_fin}`
+          : `le ${date_debut}`;
+
+      const etat = statut === "DEJA_APPROUVEE" ? "déjà approuvée" : "à approuver";
+
+      return (
+        `Enregistrer une permission (${etat}) pour ${personne}, ${periode}` +
+        (motif ? ` (${motif})` : "") +
+        "."
+      );
+    },
+
+    verifier({ personne }) {
+      return exigerEmploye(personne);
+    },
+
+    async executer({ personne, date_debut, date_fin, statut, motif }) {
+      const { employe, erreur } = exigerEmploye(personne);
+
+      if (erreur) {
+        return { erreur };
+      }
+
+      const odoo = require("./odoo");
+
+      let employeOdoo;
+      let typePermission;
+
+      try {
+        employeOdoo = await odoo.resoudreEmployeOdoo(employe.nom_complet);
+        typePermission = employeOdoo ? await odoo.obtenirTypeConge("Permission") : null;
+      } catch (erreurOdoo) {
+        return { erreur: `Odoo injoignable : ${erreurOdoo.message}` };
+      }
+
+      if (!employeOdoo) {
+        return {
+          erreur:
+            `${employe.nom_complet} : aucun employé correspondant trouvé dans ` +
+            `Odoo. Vérifie le nom côté Odoo.`,
+        };
+      }
+
+      if (!typePermission) {
+        return {
+          erreur: "Le type de congé « Permission » n'existe pas dans Odoo.",
+        };
+      }
+
+      const id = await odoo.creer("hr.leave", {
+        employee_id: employeOdoo.id,
+        holiday_status_id: typePermission.id,
+        request_date_from: date_debut,
+        request_date_to: date_fin || date_debut,
+        notes: motif || null,
+      });
+
+      if (statut === "DEJA_APPROUVEE") {
+        await odoo.ecrire("hr.leave", id, { state: "validate" });
+      }
+
+      return {
+        enregistre: true,
+        personne: employe.nom_complet,
+        du: date_debut,
+        au: date_fin || date_debut,
+        statut: statut === "DEJA_APPROUVEE" ? "APPROUVEE" : "A_APPROUVER",
+        odoo_id: id,
+      };
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  {
+    nom: "proposer_mesure_disciplinaire",
+    description:
+      "Propose d'enregistrer une mesure disciplinaire pour quelqu'un, cote " +
+      "Odoo (x_mesure_disciplinaire) : demande d'explication, avertissement " +
+      "verbal, avertissement écrit, ou mise à pied. Une action sensible : " +
+      "verifie toujours le motif aupres de la DRH avant de proposer.",
+    parametres: {
+      type: "object",
+      properties: {
+        personne: { type: "string" },
+        type: { type: "string", enum: TYPES_MESURE_DISCIPLINAIRE },
+        date: JOUR,
+        motif: { type: "string" },
+      },
+      required: ["personne", "type", "date"],
+    },
+
+    resumer({ personne, type, date, motif }) {
+      return (
+        `Enregistrer une mesure disciplinaire pour ${personne} : ${type} le ${date}` +
+        (motif ? ` (${motif})` : "") +
+        "."
+      );
+    },
+
+    verifier({ personne, type }) {
+      if (!TYPES_MESURE_DISCIPLINAIRE.includes(type)) {
+        return {
+          erreur: `Type inconnu : ${type}. Attendu : ${TYPES_MESURE_DISCIPLINAIRE.join(", ")}.`,
+        };
+      }
+
+      return exigerEmploye(personne);
+    },
+
+    async executer({ personne, type, date, motif }) {
+      const { employe, erreur } = exigerEmploye(personne);
+
+      if (erreur) {
+        return { erreur };
+      }
+
+      const odoo = require("./odoo");
+
+      let employeOdoo;
+
+      try {
+        employeOdoo = await odoo.resoudreEmployeOdoo(employe.nom_complet);
+      } catch (erreurOdoo) {
+        return { erreur: `Odoo injoignable : ${erreurOdoo.message}` };
+      }
+
+      if (!employeOdoo) {
+        return {
+          erreur:
+            `${employe.nom_complet} : aucun employé correspondant trouvé dans ` +
+            `Odoo. Vérifie le nom côté Odoo.`,
+        };
+      }
+
+      const id = await odoo.creer("x_mesure_disciplinaire", {
+        x_name: `${employe.nom_complet} - ${type} - ${date}`,
+        x_employee_id: employeOdoo.id,
+        x_date: date,
+        x_type: type,
+        x_motif: motif || null,
+      });
+
+      return {
+        enregistre: true,
+        personne: employe.nom_complet,
+        type,
+        date,
+        odoo_id: id,
       };
     },
   },
