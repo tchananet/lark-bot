@@ -1,5 +1,6 @@
-const { pointagesDuJour, estDeSoir, revuesEnAttente } = require("./hr");
+const { pointagesDuJour, revuesEnAttente } = require("./hr");
 const { enMinutes } = require("./temps");
+const { DEPART_SOIR } = require("./presence");
 const odoo = require("./odoo");
 
 // ---------------------------------------------------------------------------
@@ -38,6 +39,20 @@ function versDatetimeOdoo(date, heureLocale) {
   const iso = new Date(`${date}T${hh}:${mm}:00+01:00`).toISOString();
 
   return iso.slice(0, 19).replace("T", " ");
+}
+
+
+// La garde se lit sur l'heure de depart REELLEMENT pointee, pas sur le
+// planning de permanence (shift_schedule) : les echanges de garde entre
+// collegues sont frequents et rendent ce planning rapidement faux. Un
+// depart a l'heure de la releve du soir ou plus tard vaut garde, quel que
+// soit qui etait prevu au planning.
+const SEUIL_GARDE_MINUTES = enMinutes(DEPART_SOIR);
+
+function estEnGarde(heureDepart) {
+  const minutes = enMinutes(heureDepart);
+
+  return minutes !== null && SEUIL_GARDE_MINUTES !== null && minutes >= SEUIL_GARDE_MINUTES;
 }
 
 
@@ -95,7 +110,7 @@ async function synchroniserJournee(date) {
       const valeurs = {
         x_check_in: versDatetimeOdoo(date, ligne.heure_arrivee),
         x_check_out: versDatetimeOdoo(date, ligne.heure_depart),
-        x_studio_de_garde_aujourdhui: estDeSoir(ligne.employee_id, date),
+        x_studio_de_garde_aujourdhui: estEnGarde(ligne.heure_depart),
       };
 
       const ligneId = await trouverLigne(ficheId, employeOdoo.id);
@@ -121,4 +136,4 @@ async function synchroniserJournee(date) {
 }
 
 
-module.exports = { journeeEstPropre, versDatetimeOdoo, synchroniserJournee };
+module.exports = { journeeEstPropre, versDatetimeOdoo, estEnGarde, synchroniserJournee };

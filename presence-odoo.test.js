@@ -20,7 +20,6 @@ const {
 const {
   enregistrerPointage,
   signalerPourRevue,
-  enregistrerPosteDeSoir,
 } = require("./hr");
 
 // odoo.js est mocke UNE FOIS ici ; presence-odoo.js et extraction.js ne le
@@ -67,7 +66,7 @@ odoo.ecrire = async (model, id, valeurs) => {
   return true;
 };
 
-const { journeeEstPropre, versDatetimeOdoo, synchroniserJournee } = require("./presence-odoo");
+const { journeeEstPropre, versDatetimeOdoo, estEnGarde, synchroniserJournee } = require("./presence-odoo");
 
 let reussis = 0;
 
@@ -124,6 +123,20 @@ function ajouterEmploye(nom) {
   await verifier("versDatetimeOdoo rend null sur une heure illisible", () => {
     assert.strictEqual(versDatetimeOdoo("2026-10-23", null), null);
     assert.strictEqual(versDatetimeOdoo("2026-10-23", ""), null);
+  });
+
+  // La garde se lit sur l'heure de depart reellement pointee, jamais sur le
+  // planning de permanence : les echanges de garde entre collegues sont
+  // frequents et rendent ce planning rapidement faux. Quelqu'un qui part a
+  // l'heure de la releve du soir est en garde ce jour-la, qu'il ait ete
+  // planifie ou non -- et inversement, quelqu'un planifie mais qui est
+  // finalement parti a l'heure normale n'est pas compte en garde.
+  await verifier("estEnGarde se lit sur l'heure de depart, pas sur un planning", () => {
+    assert.strictEqual(estEnGarde("20h00"), true, "l'heure pile de la releve doit compter");
+    assert.strictEqual(estEnGarde("20h15"), true);
+    assert.strictEqual(estEnGarde("19h59"), false);
+    assert.strictEqual(estEnGarde("18h00"), false);
+    assert.strictEqual(estEnGarde(null), false);
   });
 
   await verifier(
@@ -187,6 +200,42 @@ function ajouterEmploye(nom) {
       assert.ok(ligneSoh, "la ligne de SOH ROMUALD est absente");
       assert.strictEqual(ligneSoh.valeurs.x_check_in, "2026-10-23 06:30:00");
       assert.strictEqual(ligneSoh.valeurs.x_check_out, "2026-10-23 16:28:00");
+    }
+  );
+
+  await verifier(
+    "une garde non planifiee (echange de dernier moment) est quand meme detectee",
+    async () => {
+      const idEchange = ajouterEmploye("PERSONNE EN ECHANGE DE GARDE");
+
+      // Pas d'enregistrerPosteDeSoir ici : cette personne n'etait PAS prevue
+      // au planning de permanence, elle a simplement pris la releve d'un
+      // collegue au dernier moment -- c'est exactement le cas que le
+      // planning ne peut pas refleter.
+      enregistrerPointage({
+        employee_id: idEchange,
+        date: "2026-10-27",
+        heure_arrivee: "08h00",
+        heure_depart: "20h30",
+      });
+
+      employeOdooParNom = new Map([
+        ["PERSONNE EN ECHANGE DE GARDE", { id: 77, name: "PERSONNE EN ECHANGE DE GARDE" }],
+      ]);
+      ficheExistanteId = null;
+      lignesExistantesCoteOdoo = new Map();
+      appelsCreer.length = 0;
+
+      await synchroniserJournee("2026-10-27");
+
+      const ligne = appelsCreer.find((a) => a.model === "x_manual.attendance.line");
+
+      assert.ok(ligne, "la ligne n'a pas ete creee");
+      assert.strictEqual(
+        ligne.valeurs.x_studio_de_garde_aujourdhui,
+        true,
+        "un depart a 20h30 doit compter comme garde, meme sans planning prealable"
+      );
     }
   );
 

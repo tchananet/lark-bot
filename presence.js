@@ -330,4 +330,5 @@ module.exports = {
   evaluerJournee,
   faitsDePonctualite,
   TYPES_PRESENCE_CONFIRMEE,
+  DEPART_SOIR,
 };
