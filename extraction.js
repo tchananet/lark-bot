@@ -393,7 +393,7 @@ async function lirePages(chemin) {
 
 // Ecrire ce qui a ete lu. Separe de la lecture pour qu'un envoi de plusieurs
 // pages puisse etre recadre sur une seule journee avant la moindre ecriture.
-function enregistrerLecture({ retenus, divergences, moteurUnique, documentId }) {
+async function enregistrerLecture({ retenus, divergences, moteurUnique, documentId }) {
   let enregistres = 0;
   let vides = 0;
   const enRevue = [...divergences];
@@ -442,13 +442,34 @@ function enregistrerLecture({ retenus, divergences, moteurUnique, documentId }) 
     signalerPourRevue({ ...divergence, source_document_id: documentId });
   }
 
+  const dates = [...new Set(retenus.map((l) => l.date))].sort();
+
+  // Pousser vers Odoo chaque journee devenue propre -- jamais celles qui
+  // portent encore une cellule en litige. Un echec cote Odoo (reseau,
+  // identifiants absents) ne doit jamais faire echouer l'enregistrement
+  // local, qui reste la source de verite : on le rattrape juste au prochain
+  // envoi ou a la prochaine correction.
+  const synchronisationsOdoo = [];
+
+  for (const date of dates) {
+    try {
+      const { synchroniserJournee } = require("./presence-odoo");
+
+      synchronisationsOdoo.push(await synchroniserJournee(date));
+    } catch (erreur) {
+      console.warn(`[odoo] synchronisation de la presence du ${date} impossible : ${erreur.message}`);
+      synchronisationsOdoo.push({ date, synchronise: false, motif: "erreur", erreur: erreur.message });
+    }
+  }
+
   return {
-    dates: [...new Set(retenus.map((l) => l.date))].sort(),
+    dates,
     enregistres,
     vides,
     en_revue: enRevue.length,
     divergences: enRevue,
     moteur_unique: moteurUnique,
+    synchronisations_odoo: synchronisationsOdoo,
   };
 }
 
@@ -548,7 +569,7 @@ async function extrairePointageLot(chemins, options = {}) {
 
   const { reference, ecartees } = ramenerALaMemeJournee(lectures);
 
-  const resultat = enregistrerLecture({
+  const resultat = await enregistrerLecture({
     retenus: lectures.flatMap((lecture) => lecture.retenus),
     divergences: lectures.flatMap((lecture) => lecture.divergences),
     moteurUnique: lectures.find((lecture) => lecture.moteurUnique)?.moteurUnique || null,

@@ -259,7 +259,7 @@ const OUTILS_ECRITURE = [
       return exigerEmploye(personne);
     },
 
-    executer({ personne, date, champ, valeur }, contexte) {
+    async executer({ personne, date, champ, valeur }, contexte) {
       const { employe, erreur } = exigerEmploye(personne);
 
       if (erreur) {
@@ -274,6 +274,20 @@ const OUTILS_ECRITURE = [
         declare_par: contexte.declare_par,
       });
 
+      // Cette correction peut etre justement celle qui ferme la derniere
+      // cellule en litige de la journee : on retente la synchronisation
+      // Odoo a chaque correction, pas seulement a l'arrivee d'une fiche.
+      let synchronisationOdoo = null;
+
+      try {
+        const { synchroniserJournee } = require("./presence-odoo");
+
+        synchronisationOdoo = await synchroniserJournee(date);
+      } catch (erreurOdoo) {
+        console.warn(`[odoo] synchronisation de la presence du ${date} impossible : ${erreurOdoo.message}`);
+        synchronisationOdoo = { date, synchronise: false, motif: "erreur", erreur: erreurOdoo.message };
+      }
+
       return {
         corrige: true,
         personne: employe.nom_complet,
@@ -281,6 +295,7 @@ const OUTILS_ECRITURE = [
         champ,
         valeur: resultat.heure,
         cellules_en_revue_fermees: resultat.revues_closes,
+        synchronisation_odoo: synchronisationOdoo,
       };
     },
   },
